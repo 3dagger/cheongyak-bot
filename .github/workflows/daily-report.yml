@@ -1,0 +1,30 @@
+name: daily-report
+
+on:
+  schedule:
+    - cron: "0 23 * * *" # 23:00 UTC = 다음날 08:00 KST
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+      CHEONGYAK_SERVICE_KEY: ${{ secrets.CHEONGYAK_SERVICE_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 리포트 발송
+        run: python3 cheongyak_report.py
+
+      # 60일간 커밋이 없으면 GitHub이 스케줄을 끄므로, 실행 때마다 워크플로우를 다시 활성화해 타이머를 리셋한다
+      - name: 스케줄 자동 비활성화 방지
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable daily-report.yml || true

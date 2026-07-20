@@ -30,18 +30,15 @@ python3 ~/cheongyak-bot/cheongyak_report.py --dry-run   # 리포트 내용 미�
 python3 ~/cheongyak-bot/cheongyak_report.py             # 실제 전송
 ```
 
-## 스케줄
+## 스케줄 (GitHub Actions)
 
-`~/Library/LaunchAgents/com.nuyhoos.cheongyak-report.plist` 가 매일 **08:00** 에 실행한다.
-8시에 Mac이 잠들어 있었다면 깨어날 때 한 번 실행된다 (전원이 꺼져 있으면 그날은 건너뜀).
+[.github/workflows/daily-report.yml](.github/workflows/daily-report.yml) 이 매일 **08:00 KST** (23:00 UTC, GitHub 사정에 따라 5~15분 지연 가능)에 클라우드에서 실행한다. 로컬 Mac이 꺼져 있어도 발송된다.
 
-시간 변경: plist의 `Hour`/`Minute` 수정 후
-```bash
-launchctl bootout gui/$(id -u)/com.nuyhoos.cheongyak-report
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nuyhoos.cheongyak-report.plist
-```
+- 키는 레포 **Secrets** 3개로 주입: `CHEONGYAK_SERVICE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+- 수동 실행: Actions 탭 → daily-report → Run workflow, 또는 `gh workflow run daily-report.yml`
+- 60일 무활동 시 스케줄이 꺼지는 GitHub 정책은 워크플로우가 매 실행마다 스스로 재활성화해서 방지
 
-로그: `~/cheongyak-bot/logs/`
+시간 변경: workflow의 `cron` 값 수정 (UTC 기준, KST−9시간)
 
 ## 설정 (.env)
 
