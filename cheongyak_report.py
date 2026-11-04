@@ -58,6 +58,11 @@ UPCOMING_DAYS = 14
 LH_LIST_URL = "https://apis.data.go.kr/B552555/lhLeaseNoticeInfo1/lhLeaseNoticeInfo1"
 LH_CATEGORIES = ("05", "06", "13")  # 분양주택, 임대주택, 주거복지(신혼희망타운 등). 토지·상가는 제외합니다.
 LH_DAYS = 90  # LH 임대는 게시 후 40일 넘게 접수하는 공고가 있어 청약홈보다 길게 잡습니다.
+LH_DETAIL_URL = "https://apis.data.go.kr/B552555/lhLeaseNoticeDtlInfo1/getLeaseNoticeDtlInfo1"
+LH_DETAIL_KEYS = ("PAN_ID", "SPL_INF_TP_CD", "CCR_CNNT_SYS_DS_CD", "UPP_AIS_TP_CD", "AIS_TP_CD")
+LH_DATE_RE = re.compile(r"(\d{4})\.(\d{2})\.(\d{2})")
+# LH 공공분양은 청약홈에도 올라오며, 공고 본문의 주택관리번호로 같은 공고인지 알 수 있습니다.
+LH_HOUSE_NO_RE = re.compile(r"주택관리번호[^0-9]{0,10}(\d{10})")
 SH_BOARD_URL = "https://www.i-sh.co.kr/app/lay2/program/S1T294C297/www/brd/m_247/{}.do"
 SH_BOARDS = (("1", "SH 분양"), ("2", "SH 임대"))
 SH_EXCLUDE = ("당첨", "결과", "명단", "발표", "동호", "서류")
@@ -199,7 +204,80 @@ def lh_to_row(raw):
         "RCRIT_PBLANC_DE": norm_date(field(raw, "PAN_NT_ST_DT", "PAN_DT")),
         "PBLANC_URL": field(raw, "DTL_URL"),
         "_phases": [("마감", "", closing)] if closing else [],
+        "_lh_keys": {key: field(raw, key) for key in LH_DETAIL_KEYS},
     }
+
+
+def lh_phase_label(target):
+    """LH 공급일정의 공급 대상명을 청약홈과 같은 단계 라벨로 묶습니다."""
+    if "특별" in target or target == "기관추천":
+        return "특공"
+    if target.startswith("일반공급") or "우선공급" in target:
+        return "일반"
+    return target or "접수"
+
+
+def lh_schedule(rows):
+    """LH 공급일정(dsSplScdl)을 [(라벨, 시작일, 종료일)]과 신생아·신혼 특공 여부로 바꿉니다."""
+    spans = {}
+    targets = [field(row, "HS_SBSC_ACP_TRG_CD_NM").strip() for row in rows]
+    family = {label: None for label in ("신생아", "신혼") if any(label in t for t in targets)}
+    for row, target in zip(rows, targets):
+        dates = ["-".join(m) for m in LH_DATE_RE.findall(field(row, "ACP_DTTM"))]
+        if not dates:
+            continue
+        label = lh_phase_label(target)
+        begin, end = spans.get(label, (dates[0], dates[-1]))
+        spans[label] = (min(begin, dates[0]), max(end, dates[-1]))
+    steps = sorted(((label, b, e) for label, (b, e) in spans.items()), key=lambda p: p[1])
+    return steps, family
+
+
+def lh_dataset(body, name):
+    parts = body if isinstance(body, list) else [body]
+    return next((p[name] for p in parts if isinstance(p, dict) and name in p), [])
+
+
+def attach_lh_schedules(service_key, rows):
+    """LH 공고별 상세정보로 단계별 접수일, 신생아·신혼 특공 여부, 청약홈 주택관리번호를 붙입니다.
+
+    조회에 실패한 건수를 돌려줍니다.
+    """
+    failed = 0
+    for row in rows:
+        try:
+            body = http_get_json(LH_DETAIL_URL, dict(serviceKey=service_key, **row["_lh_keys"]))
+        except Exception:  # noqa: BLE001 - 상세 일정은 보조 정보라 실패해도 마감일로 리포트합니다
+            failed += 1
+            continue
+        notice = " ".join(field(d, "PAN_DTL_CTS") for d in lh_dataset(body, "dsEtcInfo"))
+        match = LH_HOUSE_NO_RE.search(notice)
+        if match:
+            row["HOUSE_MANAGE_NO"] = match.group(1)
+        steps, family = lh_schedule(lh_dataset(body, "dsSplScdl"))
+        if steps:
+            row["_phases"] = row["_lh_steps"] = steps
+        if family:
+            row["_special"] = family
+    return failed
+
+
+def merge_lh_into_applyhome(items):
+    """청약홈에도 올라온 LH 공고는 청약홈 쪽 하나만 남깁니다.
+
+    세대수는 청약홈 값을 쓰고, 접수 일정은 공급 대상별로 나뉜 LH 상세 일정으로 바꿉니다.
+    """
+    latest_lh = {}  # 정정공고가 있으면 공고일이 가장 늦은 LH 공고의 일정을 씁니다.
+    for row in sorted((r for r in items if r["_type"] == "LH"), key=lambda r: field(r, "RCRIT_PBLANC_DE")):
+        if field(row, "HOUSE_MANAGE_NO") and row.get("_lh_steps"):
+            latest_lh[field(row, "HOUSE_MANAGE_NO")] = row
+    merged = set()
+    for row in items:
+        no = field(row, "HOUSE_MANAGE_NO")
+        if row["_type"] not in ("LH", "SH") and no in latest_lh:
+            row["_phases"] = latest_lh[no]["_lh_steps"]
+            merged.add(no)
+    return [r for r in items if not (r["_type"] == "LH" and field(r, "HOUSE_MANAGE_NO") in merged)]
 
 
 def fetch_lh(service_key, today):
@@ -336,7 +414,12 @@ def last_date(row):
 
 
 def has_family_quota(row):
-    return any(count > 0 for count in row.get("_special", {}).values())
+    """세대수가 None이면 물량은 모르지만 해당 특공이 있다는 뜻입니다(LH)."""
+    return any(count is None or count > 0 for count in row.get("_special", {}).values())
+
+
+def format_family(label, count):
+    return "{} 특공".format(label) if count is None else "{} {}세대".format(label, count)
 
 
 def house_type(row):
@@ -367,8 +450,9 @@ def format_line(row):
     if details:
         line += "\n   " + " · ".join(details)
     if has_family_quota(row):
-        line += "\n   👶 " + " · ".join("{} {}세대".format(label, count)
-                                       for label, count in row["_special"].items() if count)
+        line += "\n   👶 " + " · ".join(format_family(label, count)
+                                       for label, count in row["_special"].items()
+                                       if count is None or count > 0)
     return line
 
 
@@ -497,6 +581,11 @@ def main():
     failed = attach_special_counts(service_key, targets)
     if failed:
         warnings.append("특공 세대수 조회 실패 {}건".format(failed))
+    lh_targets = [r for r in items if r["_type"] == "LH" and last_date(r) >= today.isoformat()]
+    failed = attach_lh_schedules(service_key, lh_targets)
+    if failed:
+        warnings.append("LH 접수 일정 조회 실패 {}건 (마감일만 표시)".format(failed))
+    items = merge_lh_into_applyhome(items)
 
     seen = load_seen()
     report, has_news = build_report(items, today, warnings, seen)
