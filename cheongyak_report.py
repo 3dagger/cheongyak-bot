@@ -24,6 +24,10 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 ENV_PATH = BASE_DIR / ".env"
+# 이미 리포트한 공고 ID를 기록합니다. GitHub Actions에서는 캐시로 실행 간에 이어집니다.
+SEEN_PATH = BASE_DIR / ".state" / "seen.json"
+SEEN_KEEP_DAYS = 180  # 수집 기간(청약홈 45일·LH 90일)보다 넉넉히 보관합니다.
+NEW_LOOKBACK_DAYS = 14  # 처음 보는 공고라도 공고일이 이보다 오래되면 새 공고로 치지 않습니다.
 
 API_BASE = "https://api.odcloud.kr/api/ApplyhomeInfoDetailSvc/v1"
 # (유형 라벨, 엔드포인트, 모집공고일 조건의 날짜 형식). 날짜 형식은 API 명세를 따릅니다.
@@ -137,6 +141,8 @@ def fetch_notices(service_key, since):
                     if key.endswith("DE") and row[key]:
                         row[key] = norm_date(row[key])
                 row["_type"] = type_label
+                row["_id"] = "{}:{}:{}".format(type_label, field(row, "HOUSE_MANAGE_NO"),
+                                               field(row, "PBLANC_NO"))
                 items.append(row)
             if len(rows) < 300 or page >= 5:
                 break
@@ -186,6 +192,7 @@ def lh_to_row(raw):
     closing = norm_date(field(raw, "CLSG_DT"))
     return {
         "_type": "LH",
+        "_id": "LH:" + field(raw, "PAN_ID"),
         "SUBSCRPT_AREA_CODE_NM": short_region(field(raw, "CNP_CD_NM")),
         "HOUSE_NM": field(raw, "PAN_NM"),
         "HOUSE_DTL_SECD_NM": "LH " + kind if kind else "LH",
@@ -199,6 +206,7 @@ def fetch_lh(service_key, today):
     """LH청약플러스 분양·임대·주거복지 공고를 게시일 기준 최근 LH_DAYS일치 수집합니다.
 
     문서상 조건은 PAN_NT_ST_DT·CLSG_DT지만 실제로는 무시되고 PAN_ST_DT·PAN_ED_DT(YYYYMMDD)가 적용됩니다.
+    전 유형 합계가 0건이면 응답 형식이 바뀐 것으로 보고 예외를 던집니다.
     """
     items = []
     for category in LH_CATEGORIES:
@@ -214,23 +222,30 @@ def fetch_lh(service_key, today):
             items.extend(lh_to_row(r) for r in rows)
             if len(rows) < 100:
                 break
+    if not items:
+        raise ValueError("최근 {}일 공고가 0건입니다. 응답 형식을 확인해 주세요.".format(LH_DAYS))
     return items
 
 
 def parse_sh_board(page, board, label):
-    """SH 공고 게시판 HTML에서 입주자 모집 공고만 골라냅니다. 당첨자·결과 게시 글은 제외합니다."""
+    """SH 공고 게시판 HTML에서 입주자 모집 공고만 골라냅니다. 당첨자·결과 게시 글은 제외합니다.
+
+    게시글 행을 하나도 찾지 못하면 페이지 구조가 바뀐 것으로 보고 예외를 던집니다.
+    """
     body = page[page.find("<tbody"):page.find("</tbody>")]
+    matches = [m for m in (SH_ROW_RE.search(tr)
+                           for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.S)) if m]
+    if not matches:
+        raise ValueError("{} 게시판에서 글을 찾지 못했습니다. 페이지 구조를 확인해 주세요.".format(label))
     rows = []
-    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.S):
-        match = SH_ROW_RE.search(tr)
-        if not match:
-            continue
+    for match in matches:
         seq, raw_title, posted = match.groups()
         title = " ".join(html.unescape(re.sub(r"<[^>]+>", "", raw_title)).split())
         if not ("입주" in title and "모집" in title) or any(w in title for w in SH_EXCLUDE):
             continue
         rows.append({
             "_type": "SH",
+            "_id": "SH:{}:{}".format(board, seq),
             "SUBSCRPT_AREA_CODE_NM": "서울",
             "HOUSE_NM": title,
             "HOUSE_DTL_SECD_NM": label,
@@ -249,6 +264,34 @@ def fetch_sh():
         page = http_get(SH_BOARD_URL.format("list"), {"multi_itm_seq": board})
         items.extend(parse_sh_board(page, board, label))
     return items
+
+
+def load_seen():
+    """이미 리포트한 공고 ID → 처음 본 날짜를 읽습니다. 기록이 없거나 깨졌으면 None을 돌려줍니다."""
+    try:
+        return json.loads(SEEN_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def save_seen(seen, items, today):
+    """이번에 조회한 공고를 기록에 더하고, SEEN_KEEP_DAYS보다 오래된 기록은 지웁니다."""
+    merged = dict(seen or {})
+    for row in items:
+        merged.setdefault(row["_id"], today.isoformat())
+    cutoff = (today - timedelta(days=SEEN_KEEP_DAYS)).isoformat()
+    merged = {key: day for key, day in merged.items() if day >= cutoff}
+    SEEN_PATH.parent.mkdir(exist_ok=True)
+    SEEN_PATH.write_text(json.dumps(merged, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+
+
+def is_new(row, today, seen):
+    """기록이 있으면 처음 보는 공고를, 없으면(첫 실행) 공고일이 어제·오늘인 공고를 새 공고로 봅니다."""
+    posted = field(row, "RCRIT_PBLANC_DE")
+    if seen is None:
+        return posted >= (today - timedelta(days=1)).isoformat()
+    return (row["_id"] not in seen
+            and posted >= (today - timedelta(days=NEW_LOOKBACK_DAYS)).isoformat())
 
 
 def collect_optional(label, fetch, warnings):
@@ -329,13 +372,12 @@ def format_line(row):
     return line
 
 
-def build_report(items, today, warnings=()):
-    yesterday = (today - timedelta(days=1)).isoformat()
+def build_report(items, today, warnings=(), seen=None):
     tomorrow = (today + timedelta(days=1)).isoformat()
     today_s = today.isoformat()
     upcoming_until = (today + timedelta(days=UPCOMING_DAYS)).isoformat()
 
-    new_notices = [r for r in items if field(r, "RCRIT_PBLANC_DE") >= yesterday]
+    new_notices = [r for r in items if is_new(r, today, seen)]
     family = [r for r in items if has_family_quota(r)
               and any(today_s <= b <= upcoming_until for _, b, _ in phases(r))]
     opening = [r for r in items if any(b == today_s for _, b, _ in phases(r))]
@@ -351,7 +393,8 @@ def build_report(items, today, warnings=()):
             sections.append("<b>{}</b>\n{}".format(
                 title, "\n".join(format_line(r) for r in rows)))
 
-    add_section("🆕 새로 올라온 공고 (어제~오늘)", new_notices)
+    add_section("🆕 새로 올라온 공고 ({})".format(
+        "어제~오늘" if seen is None else "지난 리포트 이후"), new_notices)
     add_section("👶 신생아·신혼 특공 접수 예정 ({}일 내)".format(UPCOMING_DAYS), family)
     add_section("📬 오늘 접수 시작", opening)
     add_section("⏰ 마감 임박 (오늘·내일)", closing)
@@ -438,6 +481,8 @@ def main():
     warnings = []
 
     items = fetch_notices(service_key, since)
+    if not any(r["_type"] == "APT" for r in items):
+        warnings.append("청약홈 APT 공고가 0건입니다. API 응답을 확인해 주세요.")
     items += collect_optional("LH", lambda: fetch_lh(service_key, today), warnings)
     if not area_filter or any("서울" in a for a in area_filter):
         items += collect_optional("SH", fetch_sh, warnings)
@@ -453,7 +498,8 @@ def main():
     if failed:
         warnings.append("특공 세대수 조회 실패 {}건".format(failed))
 
-    report, has_news = build_report(items, today, warnings)
+    seen = load_seen()
+    report, has_news = build_report(items, today, warnings, seen)
 
     if "--dry-run" in args:
         print(report)
@@ -461,11 +507,34 @@ def main():
 
     if not has_news and cfg.get("SEND_WHEN_EMPTY", "true").lower() == "false":
         print("새 소식 없음, 전송 생략 (SEND_WHEN_EMPTY=false)")
-        return
+    else:
+        send_telegram(token, chat_id, report)
+        print("{} 리포트 전송 완료 (공고 {}건 조회)".format(today.isoformat(), len(items)))
+    save_seen(seen, items, today)
 
-    send_telegram(token, chat_id, report)
-    print("{} 리포트 전송 완료 (공고 {}건 조회)".format(today.isoformat(), len(items)))
+
+def notify_failure(err):
+    """리포트 생성이 중간에 실패하면 원인과 실행 로그 링크를 텔레그램으로 알립니다."""
+    cfg = load_config()
+    token, chat_id = cfg.get("TELEGRAM_BOT_TOKEN"), cfg.get("TELEGRAM_CHAT_ID")
+    if not (token and chat_id) or "--dry-run" in sys.argv:
+        return
+    text = "❗ <b>청약 리포트 생성 실패</b>\n{}: {}".format(
+        type(err).__name__, html.escape(str(err)))
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    if run_id:
+        text += '\n<a href="{}/{}/actions/runs/{}">실행 로그</a>'.format(
+            os.environ.get("GITHUB_SERVER_URL", "https://github.com"),
+            os.environ.get("GITHUB_REPOSITORY", ""), run_id)
+    try:
+        send_telegram(token, chat_id, text)
+    except Exception:  # noqa: BLE001 - 텔레그램 자체가 원인이면 알릴 방법이 없습니다
+        pass
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        notify_failure(error)
+        raise
