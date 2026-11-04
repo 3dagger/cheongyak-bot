@@ -57,6 +57,7 @@ UPCOMING_DAYS = 14
 
 LH_LIST_URL = "https://apis.data.go.kr/B552555/lhLeaseNoticeInfo1/lhLeaseNoticeInfo1"
 LH_CATEGORIES = ("05", "06", "13")  # 분양주택, 임대주택, 주거복지(신혼희망타운 등). 토지·상가는 제외합니다.
+LH_EXCLUDE_TYPES = ("가정어린이집",)  # 임대주택 분류에 섞여 오는 주거 외 공고입니다.
 LH_DAYS = 90  # LH 임대는 게시 후 40일 넘게 접수하는 공고가 있어 청약홈보다 길게 잡습니다.
 LH_DETAIL_URL = "https://apis.data.go.kr/B552555/lhLeaseNoticeDtlInfo1/getLeaseNoticeDtlInfo1"
 LH_DETAIL_KEYS = ("PAN_ID", "SPL_INF_TP_CD", "CCR_CNNT_SYS_DS_CD", "UPP_AIS_TP_CD", "AIS_TP_CD")
@@ -69,6 +70,13 @@ SH_EXCLUDE = ("당첨", "결과", "명단", "발표", "동호", "서류")
 SH_ROW_RE = re.compile(r"getDetailView\('(\d+)'\).*?>(.*?)</a>.*?(\d{4}-\d{2}-\d{2})", re.S)
 
 WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
+REGION_NAMES = (
+    ("서울", ("서울",)), ("부산", ("부산",)), ("대구", ("대구",)), ("인천", ("인천",)),
+    ("광주", ("광주",)), ("대전", ("대전",)), ("울산", ("울산",)), ("세종", ("세종",)),
+    ("경기", ("경기",)), ("강원", ("강원",)), ("충북", ("충북", "충청북도")),
+    ("충남", ("충남", "충청남도")), ("전북", ("전북", "전라북도")), ("전남", ("전남", "전라남도")),
+    ("경북", ("경북", "경상북도")), ("경남", ("경남", "경상남도")), ("제주", ("제주",)),
+)
 
 
 def load_config():
@@ -192,6 +200,24 @@ def short_region(name):
     return name[:2] if len(name) == 3 and name.endswith("도") else name
 
 
+def regions_in(text):
+    """제목에 나온 시·도를 짧은 이름(경남, 경기 등)으로 돌려줍니다."""
+    return {short for short, names in REGION_NAMES if any(name in text for name in names)}
+
+
+def in_area(row, area_filter):
+    """지역 필터를 통과하는지 봅니다.
+
+    LH는 지역이 분명한 공고에도 '전국'을 다는 경우가 있어, 전국 공고는 제목에 나온 시·도로 다시 판단합니다.
+    제목에 시·도가 없으면 정말 전국 공고로 보고 통과시킵니다.
+    """
+    region = field(row, "SUBSCRPT_AREA_CODE_NM")
+    if region != "전국":
+        return any(a in region for a in area_filter)
+    mentioned = regions_in(field(row, "HOUSE_NM"))
+    return not mentioned or any(a in m or m in a for a in area_filter for m in mentioned)
+
+
 def lh_to_row(raw):
     kind = field(raw, "AIS_TP_CD_NM", "UPP_AIS_TP_NM")
     closing = norm_date(field(raw, "CLSG_DT"))
@@ -297,7 +323,8 @@ def fetch_lh(service_key, today):
                 "PAN_ST_DT": (today - timedelta(days=LH_DAYS)).strftime("%Y%m%d"),
                 "PAN_ED_DT": today.strftime("%Y%m%d"),
             }))
-            items.extend(lh_to_row(r) for r in rows)
+            items.extend(lh_to_row(r) for r in rows
+                         if field(r, "AIS_TP_CD_NM") not in LH_EXCLUDE_TYPES)
             if len(rows) < 100:
                 break
     if not items:
@@ -572,9 +599,7 @@ def main():
         items += collect_optional("SH", fetch_sh, warnings)
 
     if area_filter:
-        items = [r for r in items
-                 if field(r, "SUBSCRPT_AREA_CODE_NM") == "전국"
-                 or any(a in field(r, "SUBSCRPT_AREA_CODE_NM") for a in area_filter)]
+        items = [r for r in items if in_area(r, area_filter)]
 
     targets = [r for r in items
                if r["_type"] in MODEL_ENDPOINTS and last_date(r) >= today.isoformat()]
