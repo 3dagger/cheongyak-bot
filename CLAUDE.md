@@ -14,4 +14,4 @@
 - 작업 하나 = 브랜치 하나(`feat/…`·`fix/…`·`docs/…`·`chore/…`·`ci/…`·`test/…`) = PR 하나.
 - 커밋 메시지 끝에 `Co-Authored-By: Claude <noreply@anthropic.com>` 를 넣는다(전역 규칙의 예외 — 이름에 모델명이 붙어도 된다).
 - 순서: 브랜치 → 커밋 → `git push -u origin <브랜치>` → `gh pr create --base main`(본문: 변경 내용 · 확인한 명령과 결과) → 확인 통과 → `gh pr merge --squash --delete-branch` → `git switch main && git pull`.
-- 머지 전 확인: 바꾼 범위에 맞게 `--dry-run` 등을 돌리고 결과를 PR 본문에 적는다. CI 가 생기면 `gh pr checks --watch` 로 통과를 확인한다. 실패하면 머지하지 않는다.
+- 머지 전 확인: 바꾼 범위에 맞게 `--dry-run` 등을 돌리고 결과를 PR 본문에 적는다. CI(`.github/workflows/test.yml`, 체크 이름 `test`)가 PR 마다 단위 테스트를 돌린다 — `gh pr checks --watch` 로 통과를 확인한다(저장소 규칙이 통과 전 머지를 막는다). 실패하면 머지하지 않는다.
