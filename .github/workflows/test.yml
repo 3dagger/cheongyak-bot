@@ -12,7 +12,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # daily-report 와 같은 러너 기본 python3 로 돌린다 — 표준 라이브러리만 쓰므로 설치할 것이 없다
       - name: 단위 테스트
