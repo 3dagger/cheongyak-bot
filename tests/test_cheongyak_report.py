@@ -58,6 +58,14 @@ class RegionTest(unittest.TestCase):
         self.assertEqual(cr.short_region("경기도"), "경기")
         self.assertEqual(cr.short_region("서울"), "서울")
 
+    def test_short_region_shortens_four_letter_provinces(self):
+        self.assertEqual(cr.short_region("충청북도"), "충북")
+        self.assertEqual(cr.short_region("충청남도"), "충남")
+        self.assertEqual(cr.short_region("전라남도"), "전남")
+        self.assertEqual(cr.short_region("경상북도"), "경북")
+        self.assertEqual(cr.short_region("경상남도"), "경남")
+        self.assertEqual(cr.short_region("전북특별자치도"), "전북")
+
     def test_regions_in_title(self):
         self.assertEqual(cr.regions_in("경남 김해 행복주택"), {"경남"})
         self.assertEqual(cr.regions_in("경상남도 창원 국민임대"), {"경남"})
@@ -70,6 +78,10 @@ class InAreaTest(unittest.TestCase):
         self.assertTrue(cr.in_area({"SUBSCRPT_AREA_CODE_NM": "서울"}, ["서울", "경기"]))
         self.assertFalse(cr.in_area({"SUBSCRPT_AREA_CODE_NM": "부산"}, ["서울", "경기"]))
         self.assertFalse(cr.in_area({}, ["서울"]))
+
+    def test_lh_province_matches_short_filter(self):
+        row = cr.lh_to_row({"PAN_ID": "1", "CNP_CD_NM": "충청북도", "PAN_NM": "청주 행복주택"})
+        self.assertTrue(cr.in_area(row, ["충북"]))
 
     def test_nationwide_notice_is_judged_by_title(self):
         def nationwide(title):

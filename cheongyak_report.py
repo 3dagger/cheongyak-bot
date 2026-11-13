@@ -194,9 +194,12 @@ def lh_rows(body):
 
 
 def short_region(name):
-    """청약홈 표기(서울·경기·인천)에 맞춰 '서울특별시', '경기도' 같은 행정구역 접미사를 뗍니다."""
+    """청약홈 표기(서울·경기·충북)에 맞춰 '서울특별시', '경기도', '충청북도' 같은 이름을 줄입니다."""
     for suffix in ("특별자치도", "특별자치시", "특별시", "광역시"):
         name = name.replace(suffix, "")
+    for short, names in REGION_NAMES:
+        if name in names:
+            return short
     return name[:2] if len(name) == 3 and name.endswith("도") else name
 
 
