@@ -208,6 +208,12 @@ def regions_in(text):
     return {short for short, names in REGION_NAMES if any(name in text for name in names)}
 
 
+def parse_area_filter(text):
+    """쉼표로 구분한 지역 목록을 돌려줍니다. 비어 있거나 '전국'이 있으면 거르지 않도록 빈 목록을 돌려줍니다."""
+    areas = [a.strip() for a in text.split(",") if a.strip()]
+    return [] if "전국" in areas else areas
+
+
 def in_area(row, area_filter):
     """지역 필터를 통과하는지 봅니다.
 
@@ -598,7 +604,7 @@ def main():
 
     today = date.today()
     since = today - timedelta(days=45)
-    area_filter = [a.strip() for a in cfg.get("AREA_FILTER", "").split(",") if a.strip()]
+    area_filter = parse_area_filter(cfg.get("AREA_FILTER", ""))
     warnings = []
 
     items = fetch_notices(service_key, since)

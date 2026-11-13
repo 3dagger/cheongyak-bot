@@ -73,6 +73,16 @@ class RegionTest(unittest.TestCase):
         self.assertEqual(cr.regions_in("전세임대 입주자 모집"), set())
 
 
+class ParseAreaFilterTest(unittest.TestCase):
+    def test_comma_separated_regions(self):
+        self.assertEqual(cr.parse_area_filter("서울, 경기,,인천 "), ["서울", "경기", "인천"])
+
+    def test_empty_or_nationwide_means_no_filter(self):
+        self.assertEqual(cr.parse_area_filter(""), [])
+        self.assertEqual(cr.parse_area_filter("전국"), [])
+        self.assertEqual(cr.parse_area_filter("서울,전국"), [])
+
+
 class InAreaTest(unittest.TestCase):
     def test_regular_region(self):
         self.assertTrue(cr.in_area({"SUBSCRPT_AREA_CODE_NM": "서울"}, ["서울", "경기"]))

@@ -122,7 +122,13 @@ gh secret set TELEGRAM_CHAT_ID -R <본인 계정>/cheongyak-bot
 
 ### 5. 지역 정하고 첫 실행
 
-받을 지역은 [.github/workflows/daily-report.yml](.github/workflows/daily-report.yml)의 `AREA_FILTER`로 정합니다. 지금은 `서울,경기,인천`으로 되어 있으니 원하는 지역으로 바꿔서 커밋하세요. 비워 두면 전국입니다.
+받을 지역은 레포 변수 `AREA_FILTER`로 정합니다. 변수가 없으면 `서울,경기,인천`입니다. 다른 지역을 받으려면 Settings → Secrets and variables → Actions의 Variables 탭에서 `AREA_FILTER`를 만들고, 전국을 받으려면 값을 `전국`으로 둡니다.
+
+```bash
+gh variable set AREA_FILTER -R <본인 계정>/cheongyak-bot --body "부산,경남"
+```
+
+워크플로 파일을 고치지 않으니 원본 레포의 변경을 Sync fork로 받을 때 충돌이 나지 않습니다.
 
 그다음 Actions 탭에서 daily-report를 골라 Run workflow를 누르거나, 아래 명령으로 바로 한 번 보내 봅니다.
 
@@ -134,11 +140,11 @@ gh workflow run daily-report.yml -R <본인 계정>/cheongyak-bot
 
 ## 설정
 
-로컬에서는 `.env`, Actions에서는 워크플로의 `env`에서 바꿉니다.
+로컬에서는 `.env`, Actions에서는 같은 이름의 레포 변수(Variables)로 바꿉니다.
 
 | 이름 | 기본값 | 설명 |
 |---|---|---|
-| `AREA_FILTER` | 비어 있음(전국) | 쉼표로 구분한 지역. 예: `서울,경기,인천`. LH의 "전국" 공고는 항상 포함됩니다 |
+| `AREA_FILTER` | `.env`: 비어 있음(전국)<br>Actions: `서울,경기,인천` | 쉼표로 구분한 지역. 예: `서울,경기,인천`. `전국`이라고 쓰면 거르지 않습니다. LH의 "전국" 공고는 항상 포함됩니다 |
 | `SEND_WHEN_EMPTY` | `true` | `false`면 소식이 없는 날에는 보내지 않습니다 |
 
 받는 시간은 워크플로의 `cron`으로 바꿉니다. UTC 기준이라 한국 시간에서 9시간을 빼야 합니다. 오전 7시에 받으려면 `0 22 * * *`입니다. GitHub 예약 실행은 정시보다 몇 분에서 수십 분 늦게 도는 경우가 많습니다.
