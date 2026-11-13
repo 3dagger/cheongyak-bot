@@ -14,7 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TZ: Asia/Seoul
-      AREA_FILTER: 서울,경기,인천
+      # 레포 변수(Settings → Secrets and variables → Actions → Variables)로 바꾼다. 없으면 서울,경기,인천
+      AREA_FILTER: ${{ vars.AREA_FILTER || '서울,경기,인천' }}
+      SEND_WHEN_EMPTY: ${{ vars.SEND_WHEN_EMPTY }}
       CHEONGYAK_SERVICE_KEY: ${{ secrets.CHEONGYAK_SERVICE_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
