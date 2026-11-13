@@ -364,6 +364,13 @@ class SplitMessageTest(unittest.TestCase):
         self.assertTrue(all(len(c) <= 40 for c in chunks))
         self.assertEqual("\n".join(chunks), text)
 
+    def test_line_longer_than_limit_is_cut_without_empty_chunks(self):
+        for text in ("x" * 50 + "\nshort", "aaa\n" + "y" * 45 + "\nbbb"):
+            chunks = cr.split_message(text, limit=20)
+            self.assertTrue(all(chunks), chunks)
+            self.assertTrue(all(len(c) <= 20 for c in chunks), chunks)
+            self.assertEqual("".join(chunks).replace("\n", ""), text.replace("\n", ""))
+
 
 class LoadConfigTest(unittest.TestCase):
     def test_env_file_and_environment_override(self):

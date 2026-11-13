@@ -521,11 +521,18 @@ def build_report(items, today, warnings=(), seen=None):
 
 
 def split_message(text, limit=3800):
+    """텔레그램 한도(4096자) 안으로 줄 단위로 나눕니다. limit보다 긴 줄은 잘라서 나눕니다."""
     if len(text) <= limit:
         return [text]
     chunks, current = [], ""
     for line in text.split("\n"):
-        if len(current) + len(line) + 1 > limit:
+        while len(line) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        if current and len(current) + len(line) + 1 > limit:
             chunks.append(current)
             current = line
         else:
