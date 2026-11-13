@@ -6,6 +6,7 @@
 - 파이썬 표준 라이브러리만 쓴다. 외부 패키지를 추가하지 않는다(README 의 "설치할 패키지 없음").
 - 공개 레포다. 키·토큰은 레포 Secrets(`CHEONGYAK_SERVICE_KEY`·`TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`)로만 다루고 `.env` 는 커밋하지 않는다.
 - 보낸 공고 기록(`.state/seen.json`)은 Actions 캐시에 둔다. 레포에 커밋하지 않는다.
+- 테스트: `python3 -m unittest discover tests`(레포 루트에서, 네트워크 없이 순수 함수만). 동작을 바꾸면 `tests/` 에 테스트를 같이 고치거나 더한다.
 - 확인: `python3 cheongyak_report.py --dry-run`(보내지 않고 출력), `--test`(텔레그램 테스트 메시지).
 
 ## Git 작업 방식
