@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-청약홈·LH청약플러스·SH 인터넷청약 공고를 모아 매일 08:00 KST 텔레그램으로 보내는 봇. `cheongyak_report.py` 하나를 GitHub Actions(`.github/workflows/daily-report.yml`)가 실행한다.
+청약홈·LH청약플러스·SH 인터넷청약 공고를 모아 매일 아침(예약 07:17 KST) 텔레그램으로 보내는 봇. `cheongyak_report.py` 하나를 GitHub Actions(`.github/workflows/daily-report.yml`)가 실행한다.
 
 ## 규칙
 - 파이썬 표준 라이브러리만 쓴다. 외부 패키지를 추가하지 않는다(README 의 "설치할 패키지 없음").
