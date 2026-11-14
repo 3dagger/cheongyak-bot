@@ -56,6 +56,7 @@ PHASES = [
 FALLBACK_PHASE = ("접수", ("RCEPT_BGNDE", "SUBSCRPT_RCEPT_BGNDE"),
                   ("RCEPT_ENDDE", "SUBSCRPT_RCEPT_ENDDE"))
 UPCOMING_DAYS = 14
+DETAIL_FAILURE_LIMIT = 3  # 공고별 상세 조회가 연달아 이만큼 실패하면 API 장애로 보고 남은 공고는 조회하지 않습니다.
 
 LH_LIST_URL = "https://apis.data.go.kr/B552555/lhLeaseNoticeInfo1/lhLeaseNoticeInfo1"
 LH_CATEGORIES = ("05", "06", "13")  # 분양주택, 임대주택, 주거복지(신혼희망타운 등). 토지·상가는 제외합니다.
@@ -109,7 +110,8 @@ def http_get(url, params=None, retries=3):
                 return resp.read().decode("utf-8")
         except Exception as err:  # noqa: BLE001 - 재시도 후 마지막 에러를 올림
             last_err = err
-            time.sleep(2 * (attempt + 1))
+            if attempt < retries - 1:
+                time.sleep(2 * (attempt + 1))
     raise last_err
 
 
@@ -181,25 +183,41 @@ def fetch_notices(service_key, since):
     return [r for r in items if field(r, "RCRIT_PBLANC_DE") >= since.isoformat()]
 
 
+def lookup_each(rows, lookup):
+    """rows마다 lookup(row)을 부르고 실패한 건수를 돌려줍니다.
+
+    공고별 상세 정보는 보조 정보라 실패해도 리포트는 보냅니다. 연달아 DETAIL_FAILURE_LIMIT번 실패하면
+    API 장애로 보고 남은 공고는 조회하지 않고 실패로 셉니다. 응답이 없을 때는 한 건에 1분 넘게 걸려,
+    끝까지 시도하면 리포트가 몇 시간 늦어지기 때문입니다.
+    """
+    failed = streak = 0
+    for index, row in enumerate(rows):
+        try:
+            lookup(row)
+        except Exception:  # noqa: BLE001 - 어떤 이유로 실패하든 그 공고만 보조 정보 없이 보냅니다
+            failed += 1
+            streak += 1
+            if streak >= DETAIL_FAILURE_LIMIT:
+                return failed + len(rows) - index - 1
+        else:
+            streak = 0
+    return failed
+
+
 def attach_special_counts(service_key, rows):
     """공고별 신생아·신혼 특별공급 세대수를 row["_special"]에 붙이고, 조회에 실패한 건수를 돌려줍니다."""
-    failed = 0
-    for row in rows:
+    def lookup(row):
         endpoint, fields = MODEL_ENDPOINTS[row["_type"]]
-        try:
-            body = http_get_json(API_BASE + "/" + endpoint, {
-                "page": 1,
-                "perPage": 100,
-                "serviceKey": service_key,
-                "cond[HOUSE_MANAGE_NO::EQ]": field(row, "HOUSE_MANAGE_NO"),
-            })
-        except Exception:  # noqa: BLE001 - 세대수는 보조 정보라 실패해도 리포트는 보냅니다
-            failed += 1
-            continue
+        body = http_get_json(API_BASE + "/" + endpoint, {
+            "page": 1,
+            "perPage": 100,
+            "serviceKey": service_key,
+            "cond[HOUSE_MANAGE_NO::EQ]": field(row, "HOUSE_MANAGE_NO"),
+        })
         models = body.get("data") or []
         row["_special"] = {label: sum(to_int(m.get(name)) for m in models)
                            for label, name in fields}
-    return failed
+    return lookup_each(rows, lookup)
 
 
 def lh_rows(body):
@@ -309,15 +327,10 @@ def lh_dataset(body, name):
 def attach_lh_schedules(service_key, rows):
     """LH 공고별 상세정보로 단계별 접수일, 신생아·신혼 특공 여부, 청약홈 주택관리번호를 붙입니다.
 
-    조회에 실패한 건수를 돌려줍니다.
+    조회에 실패한 건수를 돌려줍니다. 실패한 공고는 목록에서 받은 마감일로 리포트합니다.
     """
-    failed = 0
-    for row in rows:
-        try:
-            body = http_get_json(LH_DETAIL_URL, dict(serviceKey=service_key, **row["_lh_keys"]))
-        except Exception:  # noqa: BLE001 - 상세 일정은 보조 정보라 실패해도 마감일로 리포트합니다
-            failed += 1
-            continue
+    def lookup(row):
+        body = http_get_json(LH_DETAIL_URL, dict(serviceKey=service_key, **row["_lh_keys"]))
         notice = " ".join(field(d, "PAN_DTL_CTS") for d in lh_dataset(body, "dsEtcInfo"))
         match = LH_HOUSE_NO_RE.search(notice)
         if match:
@@ -327,7 +340,7 @@ def attach_lh_schedules(service_key, rows):
             row["_phases"] = row["_lh_steps"] = steps
         if family:
             row["_special"] = family
-    return failed
+    return lookup_each(rows, lookup)
 
 
 def merge_lh_into_applyhome(items):
