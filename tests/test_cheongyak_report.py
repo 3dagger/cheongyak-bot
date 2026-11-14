@@ -419,6 +419,52 @@ class SplitMessageTest(unittest.TestCase):
             self.assertEqual("".join(chunks).replace("\n", ""), text.replace("\n", ""))
 
 
+class HttpGetRetryTest(unittest.TestCase):
+    def test_retries_then_raises_without_sleeping_after_the_last_attempt(self):
+        with mock.patch("urllib.request.urlopen", side_effect=OSError("down")) as urlopen, \
+                mock.patch("time.sleep") as sleep:
+            with self.assertRaises(OSError):
+                cr.http_get("https://example.invalid")
+        self.assertEqual(urlopen.call_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 4])
+
+
+class LookupEachTest(unittest.TestCase):
+    @staticmethod
+    def lookup_failing_on(bad, calls):
+        def lookup(row):
+            calls.append(row)
+            if row in bad:
+                raise OSError("down")
+        return lookup
+
+    def test_scattered_failures_do_not_stop_the_rest(self):
+        calls = []
+        failed = cr.lookup_each(list(range(8)), self.lookup_failing_on({0, 1, 3, 4, 6}, calls))
+        self.assertEqual(failed, 5)
+        self.assertEqual(calls, list(range(8)))
+
+    def test_consecutive_failures_skip_the_rest_and_count_them_as_failed(self):
+        calls = []
+        failed = cr.lookup_each(list(range(10)), self.lookup_failing_on({2, 3, 4}, calls))
+        self.assertEqual(calls, [0, 1, 2, 3, 4])
+        self.assertEqual(failed, 3 + 5)
+
+    def test_outage_costs_only_a_few_requests(self):
+        rows = [{"_type": "APT", "HOUSE_MANAGE_NO": str(n)} for n in range(40)]
+        with mock.patch.object(cr, "http_get_json", side_effect=OSError("down")) as get:
+            self.assertEqual(cr.attach_special_counts("key", rows), 40)
+        self.assertEqual(get.call_count, cr.DETAIL_FAILURE_LIMIT)
+        self.assertNotIn("_special", rows[0])
+
+    def test_special_counts_are_attached_when_lookups_succeed(self):
+        rows = [{"_type": "APT", "HOUSE_MANAGE_NO": "1"}]
+        body = {"data": [{"NWBB_HSHLDCO": 3, "NWWDS_HSHLDCO": 5}, {"NWBB_HSHLDCO": 2, "NWWDS_HSHLDCO": 0}]}
+        with mock.patch.object(cr, "http_get_json", return_value=body):
+            self.assertEqual(cr.attach_special_counts("key", rows), 0)
+        self.assertEqual(rows[0]["_special"], {"신생아": 5, "신혼": 5})
+
+
 class TelegramErrorTest(unittest.TestCase):
     @staticmethod
     def http_error(code, body):
