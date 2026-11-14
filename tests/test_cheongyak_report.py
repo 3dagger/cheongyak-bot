@@ -12,13 +12,28 @@ import tempfile
 import unittest
 import urllib.error
 import urllib.parse
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
 import cheongyak_report as cr
 
 TODAY = date(2026, 11, 13)  # 금요일
+
+
+class TodayKstTest(unittest.TestCase):
+    def test_date_rolls_over_at_korean_midnight_whatever_the_machine_timezone(self):
+        utc = timezone.utc
+        self.assertEqual(cr.today_kst(datetime(2026, 11, 14, 14, 59, tzinfo=utc)), date(2026, 11, 14))
+        self.assertEqual(cr.today_kst(datetime(2026, 11, 14, 15, 0, tzinfo=utc)), date(2026, 11, 15))
+        # 예약 실행 시각(22:17 UTC)은 한국에서는 이미 다음 날 아침입니다.
+        self.assertEqual(cr.today_kst(datetime(2026, 11, 14, 22, 17, tzinfo=utc)), date(2026, 11, 15))
+        pacific = timezone(timedelta(hours=-8))
+        self.assertEqual(cr.today_kst(datetime(2026, 11, 14, 14, 17, tzinfo=pacific)), date(2026, 11, 15))
+
+    def test_defaults_to_now(self):
+        before = datetime.now(cr.KST).date()
+        self.assertIn(cr.today_kst(), (before, datetime.now(cr.KST).date()))
 
 
 class NormDateTest(unittest.TestCase):
