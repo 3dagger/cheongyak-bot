@@ -6,9 +6,11 @@
 
 import contextlib
 import io
+import json
 import os
 import tempfile
 import unittest
+import urllib.error
 import urllib.parse
 from datetime import date
 from pathlib import Path
@@ -393,6 +395,27 @@ class SplitMessageTest(unittest.TestCase):
             self.assertTrue(all(chunks), chunks)
             self.assertTrue(all(len(c) <= 20 for c in chunks), chunks)
             self.assertEqual("".join(chunks).replace("\n", ""), text.replace("\n", ""))
+
+
+class TelegramErrorTest(unittest.TestCase):
+    @staticmethod
+    def http_error(code, body):
+        return urllib.error.HTTPError("https://api.telegram.org/botTOKEN/sendMessage",
+                                      code, "Bad Request", {}, io.BytesIO(body))
+
+    def test_rejection_reason_is_reported_without_the_token(self):
+        body = json.dumps({"ok": False, "error_code": 400,
+                           "description": "Bad Request: chat not found"}).encode("utf-8")
+        with mock.patch("urllib.request.urlopen", side_effect=self.http_error(400, body)):
+            with self.assertRaises(RuntimeError) as ctx:
+                cr.send_telegram("TOKEN", "1", "hi")
+        self.assertEqual(str(ctx.exception), "텔레그램 전송 실패: Bad Request: chat not found")
+
+    def test_error_without_json_body_stays_an_http_error(self):
+        error = self.http_error(502, b"<html>Bad Gateway</html>")
+        with mock.patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(urllib.error.HTTPError):
+                cr.http_post_json("https://example.invalid", {})
 
 
 class ParseArgsTest(unittest.TestCase):

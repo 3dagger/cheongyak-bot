@@ -18,6 +18,7 @@ import re
 import sys
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, timedelta
@@ -116,11 +117,21 @@ def http_get_json(url, params=None, retries=3):
 
 
 def http_post_json(url, payload):
+    """JSON을 POST하고 응답 JSON을 돌려줍니다. 4xx·5xx라도 본문이 JSON이면 그 내용을 돌려줍니다."""
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data,
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as err:
+        # 텔레그램은 거절할 때도 {"ok": false, "description": ...}으로 이유를 알려 줍니다.
+        with err:
+            body = err.read()
+        try:
+            return json.loads(body.decode("utf-8"))
+        except ValueError:
+            raise err from None
 
 
 def norm_date(val):
@@ -571,7 +582,7 @@ def send_telegram(token, chat_id, text):
             {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML",
              "disable_web_page_preview": True})
         if not result.get("ok"):
-            raise RuntimeError("텔레그램 전송 실패: {}".format(result))
+            raise RuntimeError("텔레그램 전송 실패: {}".format(result.get("description") or result))
 
 
 def cmd_get_chat_id(cfg):
