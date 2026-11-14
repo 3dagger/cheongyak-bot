@@ -313,6 +313,7 @@ class FormatTest(unittest.TestCase):
         self.assertTrue(cr.has_family_quota({"_special": {"신생아": None}}))
         self.assertEqual(cr.format_family("신혼", None), "신혼 특공")
         self.assertEqual(cr.format_family("신생아", 52), "신생아 52세대")
+        self.assertEqual(cr.format_family("신혼", 1200), "신혼 1,200세대")
 
     def test_house_type(self):
         self.assertEqual(cr.house_type({"_type": "APT", "HOUSE_SECD_NM": "APT",
@@ -339,12 +340,18 @@ class FormatTest(unittest.TestCase):
             "_special": {"신생아": 52, "신혼": 0},
         }
         self.assertEqual(cr.format_line(row), (
-            "• [서울] 래미안 &lt;원베일리&gt; (민영 1024세대)\n"
+            "• [서울] 래미안 &lt;원베일리&gt; (민영 1,024세대)\n"
             '   특공 11-10 · 1순위 11-11~11-12 · <a href="https://www.applyhome.co.kr/notice?a=1&amp;b=2">공고</a>\n'
             "   👶 신생아 52세대"))
 
     def test_format_line_with_missing_fields(self):
         self.assertEqual(cr.format_line({"_type": "SH", "_phases": []}), "• [지역미상] 이름미상 (SH)")
+
+    def test_format_line_household_count(self):
+        row = {"_type": "SH", "SUBSCRPT_AREA_CODE_NM": "서울", "HOUSE_NM": "X", "_phases": []}
+        self.assertEqual(cr.format_line(dict(row, TOT_SUPLY_HSHLDCO=12032)), "• [서울] X (SH 12,032세대)")
+        self.assertEqual(cr.format_line(dict(row, TOT_SUPLY_HSHLDCO=84)), "• [서울] X (SH 84세대)")
+        self.assertEqual(cr.format_line(dict(row, TOT_SUPLY_HSHLDCO=0)), "• [서울] X (SH)")
 
 
 class BuildReportTest(unittest.TestCase):

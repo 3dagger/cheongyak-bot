@@ -488,7 +488,7 @@ def has_family_quota(row):
 
 
 def format_family(label, count):
-    return "{} 특공".format(label) if count is None else "{} {}세대".format(label, count)
+    return "{} 특공".format(label) if count is None else "{} {:,}세대".format(label, count)
 
 
 def house_type(row):
@@ -509,8 +509,8 @@ def format_phase(label, begin, end):
 def format_line(row):
     area = field(row, "SUBSCRPT_AREA_CODE_NM") or "지역미상"
     name = html.escape(field(row, "HOUSE_NM") or "이름미상")
-    households = field(row, "TOT_SUPLY_HSHLDCO")
-    hh = " {}세대".format(households) if households else ""
+    households = to_int(row.get("TOT_SUPLY_HSHLDCO"))
+    hh = " {:,}세대".format(households) if households else ""
     details = [format_phase(*phase) for phase in phases(row)]
     url = field(row, "PBLANC_URL")
     if url:
