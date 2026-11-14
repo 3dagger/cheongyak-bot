@@ -4,6 +4,8 @@
 실행(레포 루트에서): python3 -m unittest discover tests
 """
 
+import contextlib
+import io
 import os
 import tempfile
 import unittest
@@ -391,6 +393,24 @@ class SplitMessageTest(unittest.TestCase):
             self.assertTrue(all(chunks), chunks)
             self.assertTrue(all(len(c) <= 20 for c in chunks), chunks)
             self.assertEqual("".join(chunks).replace("\n", ""), text.replace("\n", ""))
+
+
+class ParseArgsTest(unittest.TestCase):
+    def test_no_option_sends_the_report(self):
+        args = cr.parse_args([])
+        self.assertFalse(args.dry_run or args.get_chat_id or args.test)
+
+    def test_known_options(self):
+        self.assertTrue(cr.parse_args(["--dry-run"]).dry_run)
+        self.assertTrue(cr.parse_args(["--get-chat-id"]).get_chat_id)
+        self.assertTrue(cr.parse_args(["--test"]).test)
+
+    def test_unknown_or_conflicting_options_exit_instead_of_sending(self):
+        for argv in (["--dryrun"], ["--dry"], ["extra"], ["--dry-run", "--test"]):
+            with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as ctx:
+                    cr.parse_args(argv)
+                self.assertEqual(ctx.exception.code, 2)
 
 
 class LoadConfigTest(unittest.TestCase):

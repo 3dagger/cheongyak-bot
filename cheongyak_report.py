@@ -8,9 +8,10 @@
   python3 cheongyak_report.py --get-chat-id # 봇에게 말 건 사람의 chat_id 조회
   python3 cheongyak_report.py --test        # 텔레그램으로 테스트 메시지 전송
 
-설정은 같은 폴더의 .env 파일에서 읽는다 (환경변수가 있으면 그 값이 우선).
+설정은 같은 폴더의 .env 파일에서 읽습니다 (환경변수가 있으면 그 값이 우선입니다).
 """
 
+import argparse
 import html
 import json
 import re
@@ -592,18 +593,30 @@ def cmd_get_chat_id(cfg):
             print("chat_id: {}  ({})".format(cid, name))
 
 
+def parse_args(argv):
+    """명령줄 옵션을 읽습니다. 모르는 옵션은 리포트를 보내지 않고 사용법과 함께 끝냅니다."""
+    parser = argparse.ArgumentParser(
+        description="청약홈·LH·SH 공고를 모아 텔레그램으로 데일리 리포트를 보냅니다.",
+        allow_abbrev=False)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true", help="전송하지 않고 터미널에 출력합니다")
+    mode.add_argument("--get-chat-id", action="store_true", help="봇에게 말 건 사람의 chat_id를 조회합니다")
+    mode.add_argument("--test", action="store_true", help="텔레그램으로 테스트 메시지를 보냅니다")
+    return parser.parse_args(argv)
+
+
 def main():
-    args = sys.argv[1:]
+    args = parse_args(sys.argv[1:])
     cfg = load_config()
 
-    if "--get-chat-id" in args:
+    if args.get_chat_id:
         cmd_get_chat_id(cfg)
         return
 
     token = cfg.get("TELEGRAM_BOT_TOKEN")
     chat_id = cfg.get("TELEGRAM_CHAT_ID")
 
-    if "--test" in args:
+    if args.test:
         if not (token and chat_id):
             sys.exit(".env에 TELEGRAM_BOT_TOKEN과 TELEGRAM_CHAT_ID를 먼저 넣어주세요.")
         send_telegram(token, chat_id, "✅ 청약 리포트 봇 연결 테스트 성공!")
@@ -614,7 +627,7 @@ def main():
     missing = [k for k, v in (("CHEONGYAK_SERVICE_KEY", service_key),
                               ("TELEGRAM_BOT_TOKEN", token),
                               ("TELEGRAM_CHAT_ID", chat_id)) if not v]
-    if missing and not ("--dry-run" in args and service_key):
+    if missing and not (args.dry_run and service_key):
         sys.exit("[설정 필요] .env에 다음 값이 비어 있습니다: " + ", ".join(missing))
 
     today = date.today()
@@ -649,7 +662,7 @@ def main():
     seen = load_seen()
     report, has_news = build_report(items, today, warnings, seen)
 
-    if "--dry-run" in args:
+    if args.dry_run:
         print(report)
         return
 
