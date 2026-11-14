@@ -608,7 +608,14 @@ def cmd_get_chat_id(cfg):
     token = cfg.get("TELEGRAM_BOT_TOKEN")
     if not token:
         sys.exit(".env에 TELEGRAM_BOT_TOKEN을 먼저 넣어주세요.")
-    body = http_get_json("https://api.telegram.org/bot{}/getUpdates".format(token))
+    try:
+        body = http_get_json("https://api.telegram.org/bot{}/getUpdates".format(token), retries=1)
+    except urllib.error.HTTPError as err:
+        if err.code not in (401, 404):  # 텔레그램은 틀린 토큰에 401, 형식이 다른 토큰에 404를 줍니다.
+            raise
+        err.close()
+        sys.exit("텔레그램이 봇 토큰을 거절했습니다 (HTTP {}). "
+                 ".env의 TELEGRAM_BOT_TOKEN이 BotFather가 준 값과 같은지 확인해 주세요.".format(err.code))
     chats = {}
     for update in body.get("result", []):
         msg = update.get("message") or update.get("channel_post") or {}
