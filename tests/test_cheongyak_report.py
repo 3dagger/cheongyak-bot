@@ -82,6 +82,17 @@ class ParseAreaFilterTest(unittest.TestCase):
         self.assertEqual(cr.parse_area_filter("전국"), [])
         self.assertEqual(cr.parse_area_filter("서울,전국"), [])
 
+    def test_full_names_become_short_names(self):
+        self.assertEqual(cr.parse_area_filter("서울특별시, 경기도,충청북도,강원특별자치도,서울시"),
+                         ["서울", "경기", "충북", "강원", "서울"])
+        self.assertTrue(cr.in_area({"SUBSCRPT_AREA_CODE_NM": "경기"}, cr.parse_area_filter("경기도")))
+
+    def test_unknown_names_are_kept_and_reported(self):
+        areas = cr.parse_area_filter("서울,서을,성남")
+        self.assertEqual(areas, ["서울", "서을", "성남"])
+        self.assertEqual(cr.unknown_areas(areas), ["서을", "성남"])
+        self.assertEqual(cr.unknown_areas(cr.parse_area_filter("부산광역시,제주도")), [])
+
 
 class InAreaTest(unittest.TestCase):
     def test_regular_region(self):

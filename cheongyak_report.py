@@ -209,9 +209,24 @@ def regions_in(text):
 
 
 def parse_area_filter(text):
-    """쉼표로 구분한 지역 목록을 돌려줍니다. 비어 있거나 '전국'이 있으면 거르지 않도록 빈 목록을 돌려줍니다."""
+    """쉼표로 구분한 지역을 청약홈 표기(서울·경기·충북)로 맞춘 목록을 돌려줍니다.
+
+    '서울특별시'·'경기도'처럼 써도 알아봅니다. 알아보지 못한 이름은 그대로 둡니다.
+    비어 있거나 '전국'이 있으면 거르지 않도록 빈 목록을 돌려줍니다.
+    """
     areas = [a.strip() for a in text.split(",") if a.strip()]
-    return [] if "전국" in areas else areas
+    if "전국" in areas:
+        return []
+    result = []
+    for area in areas:
+        result.extend(sorted(regions_in(area)) or [area])
+    return result
+
+
+def unknown_areas(area_filter):
+    """지역 필터에서 시·도 이름으로 알아보지 못한 항목을 돌려줍니다. 이런 항목은 어떤 공고와도 맞지 않습니다."""
+    known = {short for short, _ in REGION_NAMES}
+    return [a for a in area_filter if a not in known]
 
 
 def in_area(row, area_filter):
@@ -606,6 +621,9 @@ def main():
     since = today - timedelta(days=45)
     area_filter = parse_area_filter(cfg.get("AREA_FILTER", ""))
     warnings = []
+    unknown = unknown_areas(area_filter)
+    if unknown:
+        warnings.append("AREA_FILTER에서 알 수 없는 지역: {} (예: 서울,경기,인천)".format(", ".join(unknown)))
 
     items = fetch_notices(service_key, since)
     if not any(r["_type"] == "APT" for r in items):
