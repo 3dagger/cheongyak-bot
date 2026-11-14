@@ -21,7 +21,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -71,6 +71,7 @@ SH_BOARDS = (("1", "SH 분양"), ("2", "SH 임대"))
 SH_EXCLUDE = ("당첨", "결과", "명단", "발표", "동호", "서류")
 SH_ROW_RE = re.compile(r"getDetailView\('(\d+)'\).*?>(.*?)</a>.*?(\d{4}-\d{2}-\d{2})", re.S)
 
+KST = timezone(timedelta(hours=9))
 WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
 REGION_NAMES = (
     ("서울", ("서울",)), ("부산", ("부산",)), ("대구", ("대구",)), ("인천", ("인천",)),
@@ -132,6 +133,11 @@ def http_post_json(url, payload):
             return json.loads(body.decode("utf-8"))
         except ValueError:
             raise err from None
+
+
+def today_kst(now=None):
+    """실행하는 기기의 시간대와 상관없이 한국 날짜를 돌려줍니다. 접수일·마감일이 한국 날짜이기 때문입니다."""
+    return (now or datetime.now(timezone.utc)).astimezone(KST).date()
 
 
 def norm_date(val):
@@ -641,7 +647,7 @@ def main():
     if missing and not (args.dry_run and service_key):
         sys.exit("[설정 필요] .env에 다음 값이 비어 있습니다: " + ", ".join(missing))
 
-    today = date.today()
+    today = today_kst()
     since = today - timedelta(days=45)
     area_filter = parse_area_filter(cfg.get("AREA_FILTER", ""))
     warnings = []
