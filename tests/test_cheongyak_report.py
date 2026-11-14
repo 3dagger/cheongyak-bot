@@ -486,6 +486,36 @@ class TelegramErrorTest(unittest.TestCase):
                 cr.http_post_json("https://example.invalid", {})
 
 
+class GetChatIdTest(unittest.TestCase):
+    @staticmethod
+    def http_error(code):
+        return urllib.error.HTTPError("https://api.telegram.org/botTOKEN/getUpdates",
+                                      code, "error", {}, None)
+
+    def test_rejected_token_exits_with_a_hint_instead_of_a_traceback(self):
+        for code in (401, 404):
+            with self.subTest(code=code), \
+                    mock.patch.object(cr, "http_get_json", side_effect=self.http_error(code)):
+                with self.assertRaises(SystemExit) as ctx:
+                    cr.cmd_get_chat_id({"TELEGRAM_BOT_TOKEN": "TOKEN"})
+                self.assertIn("TELEGRAM_BOT_TOKEN", str(ctx.exception))
+                self.assertNotIn("botTOKEN", str(ctx.exception))
+
+    def test_other_http_errors_are_raised(self):
+        with mock.patch.object(cr, "http_get_json", side_effect=self.http_error(502)):
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                cr.cmd_get_chat_id({"TELEGRAM_BOT_TOKEN": "TOKEN"})
+        ctx.exception.close()
+
+    def test_lists_chats_that_messaged_the_bot(self):
+        body = {"result": [{"message": {"chat": {"id": 42, "first_name": "Soo", "last_name": "Lee"}}},
+                           {"channel_post": {"chat": {"id": -100, "title": "가족방"}}}]}
+        out = io.StringIO()
+        with mock.patch.object(cr, "http_get_json", return_value=body), contextlib.redirect_stdout(out):
+            cr.cmd_get_chat_id({"TELEGRAM_BOT_TOKEN": "TOKEN"})
+        self.assertEqual(out.getvalue(), "chat_id: 42  (Soo Lee)\nchat_id: -100  (가족방)\n")
+
+
 class ParseArgsTest(unittest.TestCase):
     def test_no_option_sends_the_report(self):
         args = cr.parse_args([])
