@@ -460,6 +460,16 @@ class HttpGetRetryTest(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 3)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 4])
 
+    def test_error_responses_are_closed_and_the_last_one_is_raised(self):
+        bodies = [io.BytesIO(b"denied") for _ in range(3)]
+        errors = [urllib.error.HTTPError("https://example.invalid", code, "Forbidden", {}, body)
+                  for code, body in zip((500, 502, 403), bodies)]
+        with mock.patch("urllib.request.urlopen", side_effect=errors), mock.patch("time.sleep"):
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                cr.http_get("https://example.invalid")
+        self.assertEqual((ctx.exception.code, str(ctx.exception)), (403, "HTTP Error 403: Forbidden"))
+        self.assertEqual([body.closed for body in bodies], [True, True, True])
+
 
 class LookupEachTest(unittest.TestCase):
     @staticmethod

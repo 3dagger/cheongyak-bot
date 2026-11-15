@@ -109,6 +109,8 @@ def http_get(url, params=None, retries=3):
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return resp.read().decode("utf-8")
         except Exception as err:  # noqa: BLE001 - 재시도 후 마지막 에러를 올림
+            if isinstance(err, urllib.error.HTTPError):
+                err.close()  # 4xx·5xx도 응답이라 연결을 쥐고 있습니다. 상태 코드와 메시지는 닫은 뒤에도 남습니다.
             last_err = err
             if attempt < retries - 1:
                 time.sleep(2 * (attempt + 1))
