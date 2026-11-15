@@ -411,6 +411,29 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(cr.format_line(dict(row, PARCPRC_ULS_AT="N", TOT_SUPLY_HSHLDCO=548)),
                          "• [서울] X (국민 548세대)")
 
+    def test_format_price(self):
+        self.assertEqual(cr.format_price(182700), "18.3억")
+        self.assertEqual(cr.format_price(177500), "17.8억")
+        self.assertEqual(cr.format_price(110100), "11억")
+        self.assertEqual(cr.format_price(99960), "10억")
+        self.assertEqual(cr.format_price(10000), "1억")
+        self.assertEqual(cr.format_price(9500), "9,500만")
+
+    def test_format_prices_lists_each_area_or_just_both_ends_when_there_are_many(self):
+        self.assertEqual(cr.format_prices([(84, 182700)]), "84㎡ 18.3억")
+        self.assertEqual(cr.format_prices([(59, 63720), (74, 75423), (84, 86314), (99, 127200)]),
+                         "59㎡ 6.4억 · 74㎡ 7.5억 · 84㎡ 8.6억 · 99㎡ 12.7억")
+        self.assertEqual(cr.format_prices([(45, 65800), (59, 95600), (70, 110100), (84, 139100), (126, 202100)]),
+                         "45㎡ 6.6억 ~ 126㎡ 20.2억 (평형 5개)")
+
+    def test_format_line_puts_prices_between_the_schedule_and_the_family_quota(self):
+        row = {"_type": "APT", "SUBSCRPT_AREA_CODE_NM": "서울", "HOUSE_NM": "X", "HOUSE_DTL_SECD_NM": "민영",
+               "_phases": [("특공", "2026-11-23", "2026-11-23")], "_prices": [(59, 98000), (84, 132000)],
+               "_special": {"신생아": 3}}
+        self.assertEqual(cr.format_line(row), "• [서울] X (민영)\n   특공 11-23\n"
+                                              "   💰 최고가 59㎡ 9.8억 · 84㎡ 13.2억\n   👶 신생아 3세대")
+        self.assertEqual(cr.format_line(dict(row, _prices=[])), "• [서울] X (민영)\n   특공 11-23\n   👶 신생아 3세대")
+
     def test_format_line_with_missing_fields(self):
         self.assertEqual(cr.format_line({"_type": "SH", "_phases": []}), "• [지역미상] 이름미상 (SH)")
 
@@ -590,7 +613,7 @@ class LookupEachTest(unittest.TestCase):
     def test_outage_costs_only_a_few_requests(self):
         rows = [{"_type": "APT", "HOUSE_MANAGE_NO": str(n)} for n in range(40)]
         with mock.patch.object(cr, "http_get_json", side_effect=OSError("down")) as get:
-            self.assertEqual(cr.attach_special_counts("key", rows), 40)
+            self.assertEqual(cr.attach_model_details("key", rows), 40)
         self.assertEqual(get.call_count, cr.DETAIL_FAILURE_LIMIT)
         self.assertNotIn("_special", rows[0])
 
@@ -598,8 +621,20 @@ class LookupEachTest(unittest.TestCase):
         rows = [{"_type": "APT", "HOUSE_MANAGE_NO": "1"}]
         body = {"data": [{"NWBB_HSHLDCO": 3, "NWWDS_HSHLDCO": 5}, {"NWBB_HSHLDCO": 2, "NWWDS_HSHLDCO": 0}]}
         with mock.patch.object(cr, "http_get_json", return_value=body):
-            self.assertEqual(cr.attach_special_counts("key", rows), 0)
+            self.assertEqual(cr.attach_model_details("key", rows), 0)
         self.assertEqual(rows[0]["_special"], {"신생아": 5, "신혼": 5})
+        self.assertEqual(rows[0]["_prices"], [])
+
+    def test_top_prices_are_attached_per_floor_area(self):
+        rows = [{"_type": "APT", "HOUSE_MANAGE_NO": "1"}]
+        body = {"data": [{"HOUSE_TY": "084.9409A", "LTTOT_TOP_AMOUNT": "182700"},
+                         {"HOUSE_TY": "084.9708B", "LTTOT_TOP_AMOUNT": "178500"},
+                         {"HOUSE_TY": "059.9800", "LTTOT_TOP_AMOUNT": 98000},
+                         {"HOUSE_TY": "101.2000", "LTTOT_TOP_AMOUNT": ""},
+                         {"HOUSE_TY": None, "LTTOT_TOP_AMOUNT": "50000"}]}
+        with mock.patch.object(cr, "http_get_json", return_value=body):
+            cr.attach_model_details("key", rows)
+        self.assertEqual(rows[0]["_prices"], [(59, 98000), (84, 182700)])
 
 
 class TelegramErrorTest(unittest.TestCase):
@@ -712,6 +747,7 @@ SH_LINE = ("• [서울] 고덕강일 입주자 모집 공고 (SH 분양)\n"
            '?multi_itm_seq=1&amp;seq=301">공고</a>')
 APT_LINE = ("• [서울] 테스트자이 (민영 1,024세대 · 분상제)\n"
             '   특공 11-20 · 1순위 11-23 · 발표 12-02 · <a href="https://www.applyhome.co.kr/x">공고</a>\n'
+            "   💰 최고가 59㎡ 9.8억 · 84㎡ 13.2억\n"
             "   👶 신생아 3세대 · 신혼 5세대")
 FIRST_REPORT = "\n\n".join([
     "🏠 <b>청약 데일리 리포트</b> — 2026-11-13 (금)",
@@ -774,7 +810,11 @@ class MainTest(unittest.TestCase):
             if endpoint == "getAPTLttotPblancDetail":
                 return json.dumps({"data": [self.APT]})
             if endpoint == "getAPTLttotPblancMdl":
-                return json.dumps({"data": [{"NWBB_HSHLDCO": 3, "NWWDS_HSHLDCO": 5}]})
+                return json.dumps({"data": [
+                    {"HOUSE_TY": "059.9800A", "LTTOT_TOP_AMOUNT": "98000", "NWBB_HSHLDCO": 1, "NWWDS_HSHLDCO": 2},
+                    {"HOUSE_TY": "084.9409A", "LTTOT_TOP_AMOUNT": "132000", "NWBB_HSHLDCO": 2, "NWWDS_HSHLDCO": 3},
+                    {"HOUSE_TY": "084.9708B", "LTTOT_TOP_AMOUNT": "128500", "NWBB_HSHLDCO": 0, "NWWDS_HSHLDCO": 0},
+                ]})
             return json.dumps({"data": []})
         if url == cr.LH_LIST_URL:
             if "lh" in self.down:

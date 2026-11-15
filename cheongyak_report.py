@@ -59,6 +59,7 @@ PHASES = [
 FALLBACK_PHASE = ("접수", ("RCEPT_BGNDE", "SUBSCRPT_RCEPT_BGNDE"),
                   ("RCEPT_ENDDE", "SUBSCRPT_RCEPT_ENDDE"))
 UPCOMING_DAYS = 14
+MAX_PRICE_GROUPS = 4  # 평형이 이보다 많으면 줄이 길어져, 가장 작은 평형과 가장 큰 평형만 표시합니다.
 DETAIL_FAILURE_LIMIT = 3  # 공고별 상세 조회가 연달아 이만큼 실패하면 API 장애로 보고 남은 공고는 조회하지 않습니다.
 
 LH_LIST_URL = "https://apis.data.go.kr/B552555/lhLeaseNoticeInfo1/lhLeaseNoticeInfo1"
@@ -215,8 +216,25 @@ def lookup_each(rows, lookup):
     return failed
 
 
-def attach_special_counts(service_key, rows):
-    """공고별 신생아·신혼 특별공급 세대수를 row["_special"]에 붙이고, 조회에 실패한 건수를 돌려줍니다."""
+def top_prices(models):
+    """주택형별 조회 결과를 [(전용면적 ㎡, 최고 분양가 만원)]으로 묶습니다.
+
+    84A·84B처럼 면적이 같은 주택형은 가장 비싼 값 하나로 합칩니다. 분양가가 없는 응답(민간임대)은 빈 목록입니다.
+    """
+    prices = {}
+    for model in models:
+        size = re.match(r"\d+", str(model.get("HOUSE_TY") or ""))
+        amount = to_int(model.get("LTTOT_TOP_AMOUNT"))
+        if size and amount:
+            prices[int(size.group())] = max(prices.get(int(size.group()), 0), amount)
+    return sorted(prices.items())
+
+
+def attach_model_details(service_key, rows):
+    """공고별 주택형 조회로 신생아·신혼 특별공급 세대수(row["_special"])와 평형별 최고 분양가(row["_prices"])를 붙입니다.
+
+    조회에 실패한 건수를 돌려줍니다.
+    """
     def lookup(row):
         endpoint, fields = MODEL_ENDPOINTS[row["_type"]]
         body = http_get_json(API_BASE + "/" + endpoint, {
@@ -228,6 +246,7 @@ def attach_special_counts(service_key, rows):
         models = body.get("data") or []
         row["_special"] = {label: sum(to_int(m.get(name)) for m in models)
                            for label, name in fields}
+        row["_prices"] = top_prices(models)
     return lookup_each(rows, lookup)
 
 
@@ -528,6 +547,23 @@ def format_family(label, count):
     return "{} 특공".format(label) if count is None else "{} {:,}세대".format(label, count)
 
 
+def format_price(amount):
+    """만원 단위 금액을 '17.8억'처럼 줄입니다. 1억 미만은 '9,500만'으로 씁니다."""
+    if amount < 10000:
+        return "{:,}만".format(amount)
+    tenths = (amount + 500) // 1000  # 0.1억 단위로 반올림합니다.
+    whole, tenth = divmod(tenths, 10)
+    return "{}.{}억".format(whole, tenth) if tenth else "{}억".format(whole)
+
+
+def format_prices(prices):
+    """[(전용면적, 최고 분양가)]를 '59㎡ 6.4억 · 84㎡ 8.6억'으로 씁니다. 평형이 많으면 양 끝만 씁니다."""
+    if len(prices) > MAX_PRICE_GROUPS:
+        (small, low), (large, high) = prices[0], prices[-1]
+        return "{}㎡ {} ~ {}㎡ {} (평형 {}개)".format(small, format_price(low), large, format_price(high), len(prices))
+    return " · ".join("{}㎡ {}".format(size, format_price(amount)) for size, amount in prices)
+
+
 def house_type(row):
     if row["_type"] == "APT":
         secd, dtl = field(row, "HOUSE_SECD_NM"), field(row, "HOUSE_DTL_SECD_NM")
@@ -564,6 +600,8 @@ def format_line(row):
     line = "• [{}] {} ({}{}{})".format(area, name, html.escape(house_type(row)), hh, capped)
     if details:
         line += "\n   " + " · ".join(details)
+    if row.get("_prices"):
+        line += "\n   💰 최고가 " + format_prices(row["_prices"])
     if has_family_quota(row):
         line += "\n   👶 " + " · ".join(format_family(label, count)
                                        for label, count in row["_special"].items()
@@ -777,9 +815,9 @@ def main():
 
     targets = [r for r in items
                if r["_type"] in MODEL_ENDPOINTS and last_date(r) >= today.isoformat()]
-    failed = attach_special_counts(service_key, targets)
+    failed = attach_model_details(service_key, targets)
     if failed:
-        warnings.append("특공 세대수 조회 실패 {}건".format(failed))
+        warnings.append("특공 세대수·분양가 조회 실패 {}건".format(failed))
     lh_targets = [r for r in items if r["_type"] == "LH" and last_date(r) >= today.isoformat()]
     failed = attach_lh_schedules(service_key, lh_targets)
     if failed:
