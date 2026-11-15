@@ -344,6 +344,16 @@ class FormatTest(unittest.TestCase):
             '   특공 11-10 · 1순위 11-11~11-12 · <a href="https://www.applyhome.co.kr/notice?a=1&amp;b=2">공고</a>\n'
             "   👶 신생아 52세대"))
 
+    def test_format_line_escapes_every_text_from_the_apis(self):
+        row = {
+            "_type": "LH", "SUBSCRPT_AREA_CODE_NM": "경기<남부>", "HOUSE_NM": "A&B 행복주택",
+            "HOUSE_DTL_SECD_NM": "LH 행복주택<청년>",
+            "_phases": [("고령자<만65세 이상>", "2026-11-20", "2026-11-21")],
+        }
+        self.assertEqual(cr.format_line(row), (
+            "• [경기&lt;남부&gt;] A&amp;B 행복주택 (LH 행복주택&lt;청년&gt;)\n"
+            "   고령자&lt;만65세 이상&gt; 11-20~11-21"))
+
     def test_format_line_with_missing_fields(self):
         self.assertEqual(cr.format_line({"_type": "SH", "_phases": []}), "• [지역미상] 이름미상 (SH)")
 

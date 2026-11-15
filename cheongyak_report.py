@@ -520,15 +520,20 @@ def format_phase(label, begin, end):
 
 
 def format_line(row):
-    area = field(row, "SUBSCRPT_AREA_CODE_NM") or "지역미상"
+    """공고 한 건을 텔레그램 HTML로 만듭니다.
+
+    API에서 온 글자는 모두 이스케이프합니다. 지역·주택 유형·접수 단계명에 <나 &가 섞여 오면
+    텔레그램이 메시지를 통째로 거절해 그날 리포트가 가지 않기 때문입니다.
+    """
+    area = html.escape(field(row, "SUBSCRPT_AREA_CODE_NM") or "지역미상")
     name = html.escape(field(row, "HOUSE_NM") or "이름미상")
     households = to_int(row.get("TOT_SUPLY_HSHLDCO"))
     hh = " {:,}세대".format(households) if households else ""
-    details = [format_phase(*phase) for phase in phases(row)]
+    details = [html.escape(format_phase(*phase)) for phase in phases(row)]
     url = field(row, "PBLANC_URL")
     if url:
         details.append('<a href="{}">공고</a>'.format(html.escape(url, quote=True)))
-    line = "• [{}] {} ({}{})".format(area, name, house_type(row), hh)
+    line = "• [{}] {} ({}{})".format(area, name, html.escape(house_type(row)), hh)
     if details:
         line += "\n   " + " · ".join(details)
     if has_family_quota(row):
