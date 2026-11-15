@@ -463,26 +463,46 @@ class BuildReportTest(unittest.TestCase):
         new = self.row("new", "서울", [("특공", "2026-11-20", "2026-11-20")],
                        RCRIT_PBLANC_DE="2026-11-13", _special={"신혼": 10})
         opening = self.row("opening", "경기", [("1순위", "2026-11-13", "2026-11-14")])
-        closing = self.row("closing", "인천", [("접수", "2026-11-10", "2026-11-14")])
-        seen = {"opening": "2026-11-01", "closing": "2026-11-01"}
+        closing = self.row("closing", "인천", [("접수", "2026-11-10", "2026-11-13")])
+        tomorrow = self.row("tomorrow", "인천", [("접수", "2026-11-10", "2026-11-14")])
+        later = self.row("later", "서울", [("접수", "2026-11-14", "2026-11-16")])
+        seen = {row["_id"]: "2026-11-01" for row in (opening, closing, tomorrow, later)}
 
-        report, counts = cr.build_report([new, opening, closing], TODAY, seen=seen)
+        report, counts = cr.build_report([new, opening, closing, tomorrow, later], TODAY, seen=seen)
 
-        self.assertEqual(counts, [("새 공고", 1), ("특공 예정", 1), ("오늘 접수 시작", 1), ("마감 임박", 2)])
+        self.assertEqual(counts, [("새 공고", 1), ("특공 예정", 1), ("오늘 접수", 2), ("내일 마감", 2)])
         self.assertTrue(report.startswith("🏠 <b>청약 데일리 리포트</b> — 2026-11-13 (금)\n\n"))
         titles = [line for line in report.split("\n") if line.startswith("<b>")]
         self.assertEqual(titles, [
             "<b>🆕 새로 올라온 공고 (지난 리포트 이후)</b>",
             "<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>",
-            "<b>📬 오늘 접수 시작</b>",
-            "<b>⏰ 마감 임박 (오늘·내일)</b>",
+            "<b>📬 오늘 접수 (시작·마감)</b>",
+            "<b>⏰ 내일 마감</b>",
         ])
         sections = report.split("\n\n")[1:]
         self.assertIn("[서울] new", sections[0])
         self.assertIn("[서울] new", sections[1])
-        self.assertIn("[경기] opening", sections[2])
-        self.assertIn("[경기] opening", sections[3])
-        self.assertIn("[인천] closing", sections[3])
+        # 오늘 시작하는 접수와 오늘 끝나는 접수가 한 섹션에 나오고, 내일 끝나는 접수는 따로 나옵니다.
+        self.assertEqual(sections[2].split("\n")[1:], [
+            "• [경기] opening (APT)", "   <b>1순위 11-13(금)~11-14(토)</b>",
+            "• [인천] closing (APT)", "   <b>접수 11-10(화)~11-13(금)</b>"])
+        self.assertEqual(sections[3].split("\n")[1:], [
+            "• [경기] opening (APT)", "   <b>1순위 11-13(금)~11-14(토)</b>",
+            "• [인천] tomorrow (APT)", "   <b>접수 11-10(화)~11-14(토)</b>"])
+        self.assertNotIn("later", report)
+
+    def test_only_the_phase_that_puts_a_notice_in_a_day_section_is_bold(self):
+        row = self.row("a", "서울", [("특공", "2026-11-13", "2026-11-13"), ("1순위", "2026-11-14", "2026-11-14"),
+                                    ("일반", "2026-11-16", "2026-11-17")], _special={"신혼": 10})
+        report, _ = cr.build_report([row], TODAY, seen={"a": "2026-11-01"})
+        self.assertEqual(report.split("\n\n")[1:], [
+            "<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n• [서울] a (APT)\n"
+            "   특공 11-13(금) · 1순위 11-14(토) · 일반 11-16(월)~11-17(화)\n   👶 신혼 10세대",
+            "<b>📬 오늘 접수 (시작·마감)</b>\n• [서울] a (APT)\n"
+            "   <b>특공 11-13(금)</b> · 1순위 11-14(토) · 일반 11-16(월)~11-17(화)\n   👶 신혼 10세대",
+            "<b>⏰ 내일 마감</b>\n• [서울] a (APT)\n"
+            "   특공 11-13(금) · <b>1순위 11-14(토)</b> · 일반 11-16(월)~11-17(화)\n   👶 신혼 10세대",
+        ])
 
     def test_first_run_title(self):
         new = self.row("new", "서울", [], RCRIT_PBLANC_DE="2026-11-12")
@@ -531,7 +551,7 @@ class SplitMessageTest(unittest.TestCase):
         notices = ["• [서울] 단지{}\n   특공 11-16 · 1순위 11-17\n   👶 신생아 3세대".format(n) for n in range(6)]
         text = "\n\n".join(["🏠 <b>리포트</b>",
                              "<b>🆕 새 공고</b>\n" + "\n".join(notices[:3]),
-                             "<b>⏰ 마감 임박</b>\n" + "\n".join(notices[3:])])
+                             "<b>⏰ 내일 마감</b>\n" + "\n".join(notices[3:])])
         lines = [line for line in text.split("\n") if line]
         for limit in range(64, 200, 7):  # 제목과 첫 공고를 합친 길이(61자)보다는 커야 한 덩어리로 둘 수 있습니다.
             chunks = cr.split_message(text, limit=limit)
@@ -756,12 +776,14 @@ APT_LINE = ("• [서울] 테스트자이 (민영 1,024세대 · 분상제)\n"
             '   특공 11-20(금) · 1순위 11-23(월) · 발표 12-02(수) · <a href="https://www.applyhome.co.kr/x">공고</a>\n'
             "   💰 최고가 59㎡ 9.8억 · 84㎡ 13.2억\n"
             "   👶 신생아 3세대 · 신혼 5세대")
+# 오늘 시작해 내일 끝나는 접수라 오늘·내일 섹션 양쪽에서 굵게 나옵니다.
+LH_DUE_LINE = LH_LINE.replace("일반 11-13(금)~11-14(토)", "<b>일반 11-13(금)~11-14(토)</b>")
 FIRST_REPORT = "\n\n".join([
     "🏠 <b>청약 데일리 리포트</b> — 2026-11-13 (금)",
     "<b>🆕 새로 올라온 공고 (어제~오늘)</b>\n" + "\n".join([LH_LINE, SH_LINE, APT_LINE]),
     "<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n" + APT_LINE,
-    "<b>📬 오늘 접수 시작</b>\n" + LH_LINE,
-    "<b>⏰ 마감 임박 (오늘·내일)</b>\n" + LH_LINE,
+    "<b>📬 오늘 접수 (시작·마감)</b>\n" + LH_DUE_LINE,
+    "<b>⏰ 내일 마감</b>\n" + LH_DUE_LINE,
 ])
 
 
@@ -860,7 +882,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(payload["text"], FIRST_REPORT)
         self.assertEqual(self.saved_seen(), self.SEEN)
         self.assertEqual(out, "2026-11-13 리포트 전송 완료 (공고 3건 조회)\n"
-                              "리포트 내용: 새 공고 3건 · 특공 예정 1건 · 오늘 접수 시작 1건 · 마감 임박 1건\n")
+                              "리포트 내용: 새 공고 3건 · 특공 예정 1건 · 오늘 접수 1건 · 내일 마감 1건\n")
 
     def test_dry_run_prints_without_sending_or_recording(self):
         self.assertEqual(self.run_main("--dry-run"), FIRST_REPORT + "\n")
@@ -873,8 +895,8 @@ class MainTest(unittest.TestCase):
 
         text = self.posts[1][1]["text"]
         self.assertNotIn("🆕", text)
-        self.assertIn("<b>📬 오늘 접수 시작</b>\n" + LH_LINE, text)
-        self.assertIn("리포트 내용: 특공 예정 1건 · 오늘 접수 시작 1건 · 마감 임박 1건\n", out)
+        self.assertIn("<b>📬 오늘 접수 (시작·마감)</b>\n" + LH_DUE_LINE, text)
+        self.assertIn("리포트 내용: 특공 예정 1건 · 오늘 접수 1건 · 내일 마감 1건\n", out)
 
     def test_failed_optional_source_becomes_a_warning(self):
         self.down = {"lh"}

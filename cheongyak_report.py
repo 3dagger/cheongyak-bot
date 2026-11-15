@@ -588,8 +588,8 @@ def format_phase(label, begin, end):
     return "{} {}~{}".format(label, short_date(begin), short_date(end))
 
 
-def format_line(row):
-    """공고 한 건을 텔레그램 HTML로 만듭니다.
+def format_line(row, highlight=None):
+    """공고 한 건을 텔레그램 HTML로 만듭니다. highlight(시작일, 종료일)가 참인 접수 단계는 굵게 표시합니다.
 
     API에서 온 글자는 모두 이스케이프합니다. 지역·주택 유형·접수 단계명에 <나 &가 섞여 오면
     텔레그램이 메시지를 통째로 거절해 그날 리포트가 가지 않기 때문입니다.
@@ -598,7 +598,10 @@ def format_line(row):
     name = html.escape(field(row, "HOUSE_NM") or "이름미상")
     households = to_int(row.get("TOT_SUPLY_HSHLDCO"))
     hh = " {:,}세대".format(households) if households else ""
-    details = [html.escape(format_phase(*phase)) for phase in phases(row)]
+    details = []
+    for label, begin, end in phases(row):
+        text = html.escape(format_phase(label, begin, end))
+        details.append("<b>{}</b>".format(text) if highlight and highlight(begin, end) else text)
     announced = field(row, "PRZWNER_PRESNATN_DE")
     if ISO_DATE_RE.fullmatch(announced):  # 당첨자 발표일이 같은 단지는 중복 청약이 제한되어, 함께 보이게 합니다.
         details.append("발표 " + short_date(announced))
@@ -624,28 +627,39 @@ def build_report(items, today, warnings=(), seen=None):
     today_s = today.isoformat()
     upcoming_until = (today + timedelta(days=UPCOMING_DAYS)).isoformat()
 
+    def starts_soon(begin, end):
+        return today_s <= begin <= upcoming_until
+
+    def due_today(begin, end):
+        return today_s in (begin, end)
+
+    def ends_tomorrow(begin, end):
+        return end == tomorrow
+
+    def having(when, rows=items):
+        return [r for r in rows if any(when(begin, end) for _, begin, end in phases(r))]
+
     new_notices = [r for r in items if is_new(r, today, seen)]
-    family = [r for r in items if has_family_quota(r)
-              and any(today_s <= b <= upcoming_until for _, b, _ in phases(r))]
-    opening = [r for r in items if any(b == today_s for _, b, _ in phases(r))]
-    closing = [r for r in items if any(e in (today_s, tomorrow) for _, _, e in phases(r))]
+    family = having(starts_soon, [r for r in items if has_family_quota(r)])
 
     header = "🏠 <b>청약 데일리 리포트</b> — {} ({})".format(
         today_s, WEEKDAY_KO[today.weekday()])
     sections, counts = [], []
 
-    def add_section(label, title, rows):
+    def add_section(label, title, rows, highlight=None):
         if rows:
             rows = sorted(rows, key=sort_key)
             sections.append("<b>{}</b>\n{}".format(
-                title, "\n".join(format_line(r) for r in rows)))
+                title, "\n".join(format_line(r, highlight) for r in rows)))
             counts.append((label, len(rows)))
 
     add_section("새 공고", "🆕 새로 올라온 공고 ({})".format(
         "어제~오늘" if seen is None else "지난 리포트 이후"), new_notices)
     add_section("특공 예정", "👶 신생아·신혼 특공 접수 예정 ({}일 내)".format(UPCOMING_DAYS), family)
-    add_section("오늘 접수 시작", "📬 오늘 접수 시작", opening)
-    add_section("마감 임박", "⏰ 마감 임박 (오늘·내일)", closing)
+    # 접수는 대부분 하루뿐이라 시작과 마감을 따로 두면 같은 단지가 두 번 나옵니다. 날짜별로 묶고,
+    # 그 섹션에 올라온 이유가 된 접수 단계를 굵게 표시합니다.
+    add_section("오늘 접수", "📬 오늘 접수 (시작·마감)", having(due_today), due_today)
+    add_section("내일 마감", "⏰ 내일 마감", having(ends_tomorrow), ends_tomorrow)
 
     footer = "".join("\n⚠️ " + html.escape(w) for w in warnings)
     footer = "\n" + footer if footer else ""
