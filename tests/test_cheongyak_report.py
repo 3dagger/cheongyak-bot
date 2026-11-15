@@ -51,7 +51,7 @@ class NormDateTest(unittest.TestCase):
 
 class ToIntTest(unittest.TestCase):
     def test_digits_are_extracted(self):
-        self.assertEqual(cr.to_int("1,024"), 9999)  # 게이트 확인용 임시 실패
+        self.assertEqual(cr.to_int("1,024"), 1024)
         self.assertEqual(cr.to_int(52), 52)
         self.assertEqual(cr.to_int("약 30세대"), 30)
 
