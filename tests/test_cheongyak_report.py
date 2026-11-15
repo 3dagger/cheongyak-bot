@@ -88,6 +88,35 @@ class RegionTest(unittest.TestCase):
         self.assertEqual(cr.short_region("경상남도"), "경남")
         self.assertEqual(cr.short_region("전북특별자치도"), "전북")
 
+    def test_city_of_address(self):
+        self.assertEqual(cr.city_of("경기도 의정부시 의정부동 224-5번지 일원"), "의정부시")
+        self.assertEqual(cr.city_of("경기도 수원시 영통구 이의동"), "수원시")
+        self.assertEqual(cr.city_of("경기도 시흥시 거모동"), "시흥시")
+        self.assertEqual(cr.city_of("경기도 화성특례시 동탄2택지개발지구"), "화성시")
+        self.assertEqual(cr.city_of("경기도 양평군 양평읍"), "양평군")
+        self.assertEqual(cr.city_of("강원특별자치도 춘천시"), "춘천시")
+        self.assertEqual(cr.city_of("전남광주통합특별시 진도군 진도읍 교동리"), "진도군")
+        self.assertEqual(cr.city_of("파주메디컬클러스터 도시개발구역 A2BL (경기도 파주시 서패동 432번지"), "파주시")
+
+    def test_city_of_address_without_a_province_city(self):
+        self.assertEqual(cr.city_of("서울특별시 영등포구 문래동3가 27-1번지 일원"), "")
+        self.assertEqual(cr.city_of("인천광역시 강화군 강화읍"), "")
+        self.assertEqual(cr.city_of("세종특별자치시 산울동"), "")
+        self.assertEqual(cr.city_of("전남광주통합특별시 광산구 하산동"), "")
+        self.assertEqual(cr.city_of("경기도 수원시영통구 이의동"), "")
+        self.assertEqual(cr.city_of(""), "")
+
+    def test_area_label_adds_the_city_only_for_provinces(self):
+        self.assertEqual(cr.area_label({"SUBSCRPT_AREA_CODE_NM": "경기",
+                                        "HSSPLY_ADRES": "경기도 의정부시 의정부동"}), "경기 의정부시")
+        self.assertEqual(cr.area_label({"SUBSCRPT_AREA_CODE_NM": "경기"}), "경기")
+        self.assertEqual(cr.area_label({"SUBSCRPT_AREA_CODE_NM": "서울",
+                                        "HSSPLY_ADRES": "서울특별시 영등포구 문래동"}), "서울")
+        # 광역시 주소에 "송도 국제도시"처럼 도로 끝나는 말이 있어도 시로 읽지 않습니다.
+        self.assertEqual(cr.area_label({"SUBSCRPT_AREA_CODE_NM": "인천",
+                                        "HSSPLY_ADRES": "인천광역시 연수구 송도 국제도시 A1블록"}), "인천")
+        self.assertEqual(cr.area_label({}), "지역미상")
+
     def test_regions_in_title(self):
         self.assertEqual(cr.regions_in("경남 김해 행복주택"), {"경남"})
         self.assertEqual(cr.regions_in("경상남도 창원 국민임대"), {"경남"})
@@ -358,6 +387,11 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(cr.format_line(row), (
             "• [경기&lt;남부&gt;] A&amp;B 행복주택 (LH 행복주택&lt;청년&gt;)\n"
             "   고령자&lt;만65세 이상&gt; 11-20~11-21"))
+
+    def test_format_line_shows_the_city_for_province_notices(self):
+        row = {"_type": "APT", "SUBSCRPT_AREA_CODE_NM": "경기", "HOUSE_NM": "X", "HOUSE_DTL_SECD_NM": "민영",
+               "HSSPLY_ADRES": "경기도 의정부시 의정부동 224-5번지 일원", "_phases": []}
+        self.assertEqual(cr.format_line(row), "• [경기 의정부시] X (민영)")
 
     def test_format_line_with_missing_fields(self):
         self.assertEqual(cr.format_line({"_type": "SH", "_phases": []}), "• [지역미상] 이름미상 (SH)")

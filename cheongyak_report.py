@@ -84,6 +84,10 @@ REGION_NAMES = (
     ("충남", ("충남", "충청남도")), ("전북", ("전북", "전라북도")), ("전남", ("전남", "전라남도")),
     ("경북", ("경북", "경상북도")), ("경남", ("경남", "경상남도")), ("제주", ("제주",)),
 )
+# 도 지역은 범위가 넓어서 공고 주소의 시·군까지 표시합니다. 서울·광역시는 시도가 곧 시라서 그대로 둡니다.
+PROVINCES = ("경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주")
+# 주소에서 도 이름 바로 다음에 오는 시·군입니다. "화성특례시"는 "화성시"로 줄입니다.
+ADDRESS_CITY_RE = re.compile(r"[가-힣]+(?:도|통합특별시)\s+([가-힣]+?)(?:특례)?(시|군)(?=[\s,)]|$)")
 
 
 def load_config():
@@ -243,6 +247,19 @@ def short_region(name):
         if name in names:
             return short
     return name[:2] if len(name) == 3 and name.endswith("도") else name
+
+
+def city_of(address):
+    """주소에서 도 다음에 오는 시·군(의정부시, 양평군)을 돌려줍니다. 찾지 못하면 빈 문자열입니다."""
+    match = ADDRESS_CITY_RE.search(address)
+    return match.group(1) + match.group(2) if match else ""
+
+
+def area_label(row):
+    """리포트에 표시할 지역입니다. 도 지역이고 주소에서 시·군을 찾으면 "경기 의정부시"처럼 붙입니다."""
+    area = field(row, "SUBSCRPT_AREA_CODE_NM") or "지역미상"
+    city = city_of(field(row, "HSSPLY_ADRES")) if area in PROVINCES else ""
+    return "{} {}".format(area, city) if city else area
 
 
 def regions_in(text):
@@ -531,7 +548,7 @@ def format_line(row):
     API에서 온 글자는 모두 이스케이프합니다. 지역·주택 유형·접수 단계명에 <나 &가 섞여 오면
     텔레그램이 메시지를 통째로 거절해 그날 리포트가 가지 않기 때문입니다.
     """
-    area = html.escape(field(row, "SUBSCRPT_AREA_CODE_NM") or "지역미상")
+    area = html.escape(area_label(row))
     name = html.escape(field(row, "HOUSE_NM") or "이름미상")
     households = to_int(row.get("TOT_SUPLY_HSHLDCO"))
     hh = " {:,}세대".format(households) if households else ""
