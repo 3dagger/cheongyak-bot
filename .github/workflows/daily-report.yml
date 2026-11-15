@@ -2,8 +2,8 @@ name: daily-report
 
 on:
   schedule:
-    # 22:17 UTC = 다음날 07:17 KST. 정각은 예약 실행이 몰려 몇 시간씩 밀리므로 피합니다
-    - cron: "17 22 * * *"
+    # 18:17 UTC = 다음날 03:17 KST. 예약 실행이 3~5시간 늦게 시작되므로(2026-11 기준), 아침 7~8시에 받도록 일찍 잡습니다
+    - cron: "17 18 * * *"
   workflow_dispatch:
 
 permissions:

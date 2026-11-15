@@ -26,8 +26,8 @@ class TodayKstTest(unittest.TestCase):
         utc = timezone.utc
         self.assertEqual(cr.today_kst(datetime(2026, 11, 14, 14, 59, tzinfo=utc)), date(2026, 11, 14))
         self.assertEqual(cr.today_kst(datetime(2026, 11, 14, 15, 0, tzinfo=utc)), date(2026, 11, 15))
-        # 예약 실행 시각(22:17 UTC)은 한국에서는 이미 다음 날 아침입니다.
-        self.assertEqual(cr.today_kst(datetime(2026, 11, 14, 22, 17, tzinfo=utc)), date(2026, 11, 15))
+        # 예약 실행 시각(18:17 UTC)은 한국에서는 이미 다음 날 새벽입니다.
+        self.assertEqual(cr.today_kst(datetime(2026, 11, 14, 18, 17, tzinfo=utc)), date(2026, 11, 15))
         pacific = timezone(timedelta(hours=-8))
         self.assertEqual(cr.today_kst(datetime(2026, 11, 14, 14, 17, tzinfo=pacific)), date(2026, 11, 15))
 
