@@ -40,6 +40,9 @@ ENDPOINTS = [
     ("오피스텔 등", "getUrbtyOfctlLttotPblancDetail", "%Y-%m-%d"),
     ("공공지원 민간임대", "getPblPvtRentLttotPblancDetail", "%Y%m%d"),
 ]
+# 리포트에서 빼는 주택 유형입니다. "오피스텔 등" 조회에는 도시형생활주택·생활숙박시설·민간임대도 함께 오므로,
+# 조회는 그대로 하고 여기 적힌 유형만 뺍니다. 다시 받으려면 비워 두면 됩니다.
+EXCLUDE_HOUSE_TYPES = ("오피스텔",)
 # 주택형별 조회에서 공고 단위로 합산할 특별공급 세대수 필드입니다.
 MODEL_ENDPOINTS = {
     "APT": ("getAPTLttotPblancMdl", (("신생아", "NWBB_HSHLDCO"), ("신혼", "NWWDS_HSHLDCO"))),
@@ -159,7 +162,7 @@ def to_int(val):
 
 
 def fetch_notices(service_key, since):
-    """모집공고일이 since 이후인 청약홈 공고를 모든 엔드포인트에서 수집합니다."""
+    """모집공고일이 since 이후인 청약홈 공고를 모든 엔드포인트에서 수집합니다. EXCLUDE_HOUSE_TYPES 유형은 뺍니다."""
     items = []
     for type_label, endpoint, date_fmt in ENDPOINTS:
         page = 1
@@ -182,7 +185,8 @@ def fetch_notices(service_key, since):
             if len(rows) < 300 or page >= 5:
                 break
             page += 1
-    return [r for r in items if field(r, "RCRIT_PBLANC_DE") >= since.isoformat()]
+    return [r for r in items if field(r, "RCRIT_PBLANC_DE") >= since.isoformat()
+            and field(r, "HOUSE_DTL_SECD_NM") not in EXCLUDE_HOUSE_TYPES]
 
 
 def lookup_each(rows, lookup):
