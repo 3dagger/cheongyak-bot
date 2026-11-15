@@ -545,6 +545,23 @@ class GetChatIdTest(unittest.TestCase):
         self.assertEqual(out.getvalue(), "chat_id: 42  (Soo Lee)\nchat_id: -100  (가족방)\n")
 
 
+class MissingConfigTest(unittest.TestCase):
+    MISSING = ["CHEONGYAK_SERVICE_KEY", "TELEGRAM_CHAT_ID"]
+
+    def test_points_at_the_env_file_locally(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(cr.missing_config_message(self.MISSING),
+                             "[설정 필요] .env에 다음 값이 비어 있습니다: CHEONGYAK_SERVICE_KEY, TELEGRAM_CHAT_ID")
+
+    def test_points_at_repository_secrets_on_github_actions(self):
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}, clear=True):
+            message = cr.missing_config_message(self.MISSING)
+        self.assertTrue(message.startswith("::error title=청약 리포트 설정::"))
+        self.assertIn("레포 Secrets에 다음 값이 없습니다: CHEONGYAK_SERVICE_KEY, TELEGRAM_CHAT_ID.", message)
+        self.assertNotIn(".env", message)
+        self.assertNotIn("\n", message)
+
+
 class ParseArgsTest(unittest.TestCase):
     def test_no_option_sends_the_report(self):
         args = cr.parse_args([])
