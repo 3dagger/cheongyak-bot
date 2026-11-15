@@ -441,6 +441,21 @@ class FormatTest(unittest.TestCase):
                                               "   💰 최고가 59㎡ 9.8억 · 84㎡ 13.2억\n   👶 신생아 3세대")
         self.assertEqual(cr.format_line(dict(row, _prices=[])), "• [서울] X (민영)\n   특공 11-23(월)\n   👶 신생아 3세대")
 
+    def test_format_repeat_keeps_only_the_relevant_phases_and_the_link(self):
+        row = {"_type": "APT", "SUBSCRPT_AREA_CODE_NM": "경기", "HOUSE_NM": "A&B 자이",
+               "HSSPLY_ADRES": "경기도 의정부시 의정부동", "TOT_SUPLY_HSHLDCO": 414, "_special": {"신혼": 3},
+               "_phases": [("특공<청년>", "2026-11-16", "2026-11-16"), ("1순위", "2026-11-17", "2026-11-18")],
+               "PBLANC_URL": "https://a.example/x?a=1&b=2"}
+
+        def on_monday(begin, end):
+            return begin == "2026-11-16"
+
+        self.assertEqual(cr.format_repeat(row, on_monday),
+                         "• [경기 의정부시] A&amp;B 자이 — 특공&lt;청년&gt; 11-16(월) · "
+                         '<a href="https://a.example/x?a=1&amp;b=2">공고</a>')
+        self.assertEqual(cr.format_repeat(dict(row, PBLANC_URL=""), on_monday),
+                         "• [경기 의정부시] A&amp;B 자이 — 특공&lt;청년&gt; 11-16(월)")
+
     def test_format_line_with_missing_fields(self):
         self.assertEqual(cr.format_line({"_type": "SH", "_phases": []}), "• [지역미상] 이름미상 (SH)")
 
@@ -479,30 +494,46 @@ class BuildReportTest(unittest.TestCase):
             "<b>📬 오늘 접수 (시작·마감)</b>",
             "<b>⏰ 내일 마감</b>",
         ])
-        sections = report.split("\n\n")[1:]
-        self.assertIn("[서울] new", sections[0])
-        self.assertIn("[서울] new", sections[1])
+        sections = [section.split("\n")[1:] for section in report.split("\n\n")[1:]]
+        self.assertEqual(sections[0], ["• [서울] new (APT)", "   특공 11-20(금)", "   👶 신혼 10세대"])
+        self.assertEqual(sections[1], ["• [서울] new — 특공 11-20(금)"])
         # 오늘 시작하는 접수와 오늘 끝나는 접수가 한 섹션에 나오고, 내일 끝나는 접수는 따로 나옵니다.
-        self.assertEqual(sections[2].split("\n")[1:], [
+        self.assertEqual(sections[2], [
             "• [경기] opening (APT)", "   <b>1순위 11-13(금)~11-14(토)</b>",
             "• [인천] closing (APT)", "   <b>접수 11-10(화)~11-13(금)</b>"])
-        self.assertEqual(sections[3].split("\n")[1:], [
-            "• [경기] opening (APT)", "   <b>1순위 11-13(금)~11-14(토)</b>",
+        self.assertEqual(sections[3], [
+            "• [경기] opening — 1순위 11-13(금)~11-14(토)",
             "• [인천] tomorrow (APT)", "   <b>접수 11-10(화)~11-14(토)</b>"])
         self.assertNotIn("later", report)
 
     def test_only_the_phase_that_puts_a_notice_in_a_day_section_is_bold(self):
-        row = self.row("a", "서울", [("특공", "2026-11-13", "2026-11-13"), ("1순위", "2026-11-14", "2026-11-14"),
-                                    ("일반", "2026-11-16", "2026-11-17")], _special={"신혼": 10})
-        report, _ = cr.build_report([row], TODAY, seen={"a": "2026-11-01"})
+        today = self.row("a", "서울", [("특공", "2026-11-13", "2026-11-13"), ("1순위", "2026-11-14", "2026-11-14"),
+                                      ("일반", "2026-11-16", "2026-11-17")])
+        tomorrow = self.row("b", "서울", [("특공", "2026-11-14", "2026-11-14"), ("1순위", "2026-11-16", "2026-11-16")])
+        report, _ = cr.build_report([today, tomorrow], TODAY, seen={"a": "2026-11-01", "b": "2026-11-01"})
         self.assertEqual(report.split("\n\n")[1:], [
-            "<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n• [서울] a (APT)\n"
-            "   특공 11-13(금) · 1순위 11-14(토) · 일반 11-16(월)~11-17(화)\n   👶 신혼 10세대",
             "<b>📬 오늘 접수 (시작·마감)</b>\n• [서울] a (APT)\n"
-            "   <b>특공 11-13(금)</b> · 1순위 11-14(토) · 일반 11-16(월)~11-17(화)\n   👶 신혼 10세대",
-            "<b>⏰ 내일 마감</b>\n• [서울] a (APT)\n"
-            "   특공 11-13(금) · <b>1순위 11-14(토)</b> · 일반 11-16(월)~11-17(화)\n   👶 신혼 10세대",
+            "   <b>특공 11-13(금)</b> · 1순위 11-14(토) · 일반 11-16(월)~11-17(화)",
+            "<b>⏰ 내일 마감</b>\n• [서울] a — 1순위 11-14(토)\n"
+            "• [서울] b (APT)\n   <b>특공 11-14(토)</b> · 1순위 11-16(월)",
         ])
+
+    def test_a_notice_is_written_in_full_only_in_the_first_section_it_appears_in(self):
+        row = self.row("a", "서울", [("특공", "2026-11-13", "2026-11-13"), ("1순위", "2026-11-14", "2026-11-14"),
+                                    ("일반", "2026-11-16", "2026-11-17")],
+                       RCRIT_PBLANC_DE="2026-11-13", _special={"신혼": 10}, PBLANC_URL="https://a.example/x")
+        report, counts = cr.build_report([row], TODAY, seen={})
+        link = '<a href="https://a.example/x">공고</a>'
+        self.assertEqual(report.split("\n\n")[1:], [
+            "<b>🆕 새로 올라온 공고 (지난 리포트 이후)</b>\n• [서울] a (APT)\n"
+            "   특공 11-13(금) · 1순위 11-14(토) · 일반 11-16(월)~11-17(화) · " + link + "\n   👶 신혼 10세대",
+            "<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n"
+            "• [서울] a — 특공 11-13(금) · 1순위 11-14(토) · 일반 11-16(월)~11-17(화) · " + link,
+            "<b>📬 오늘 접수 (시작·마감)</b>\n• [서울] a — 특공 11-13(금) · " + link,
+            "<b>⏰ 내일 마감</b>\n• [서울] a — 1순위 11-14(토) · " + link,
+        ])
+        # 한 줄로 줄여도 섹션별 건수에는 그대로 셉니다.
+        self.assertEqual(counts, [("새 공고", 1), ("특공 예정", 1), ("오늘 접수", 1), ("내일 마감", 1)])
 
     def test_first_run_title(self):
         new = self.row("new", "서울", [], RCRIT_PBLANC_DE="2026-11-12")
@@ -776,14 +807,18 @@ APT_LINE = ("• [서울] 테스트자이 (민영 1,024세대 · 분상제)\n"
             '   특공 11-20(금) · 1순위 11-23(월) · 발표 12-02(수) · <a href="https://www.applyhome.co.kr/x">공고</a>\n'
             "   💰 최고가 59㎡ 9.8억 · 84㎡ 13.2억\n"
             "   👶 신생아 3세대 · 신혼 5세대")
-# 오늘 시작해 내일 끝나는 접수라 오늘·내일 섹션 양쪽에서 굵게 나옵니다.
+# 오늘·내일 섹션에 처음 나올 때는 그 섹션에 해당하는 접수 단계가 굵게 나옵니다.
 LH_DUE_LINE = LH_LINE.replace("일반 11-13(금)~11-14(토)", "<b>일반 11-13(금)~11-14(토)</b>")
+# 앞 섹션에 이미 나온 공고는 한 줄로 줄어듭니다.
+LH_REPEAT = '• [경기] 화성동탄 행복주택 — 일반 11-13(금)~11-14(토) · <a href="https://apply.lh.or.kr/notice">공고</a>'
+APT_REPEAT = ('• [서울] 테스트자이 — 특공 11-20(금) · 1순위 11-23(월) · '
+              '<a href="https://www.applyhome.co.kr/x">공고</a>')
 FIRST_REPORT = "\n\n".join([
     "🏠 <b>청약 데일리 리포트</b> — 2026-11-13 (금)",
     "<b>🆕 새로 올라온 공고 (어제~오늘)</b>\n" + "\n".join([LH_LINE, SH_LINE, APT_LINE]),
-    "<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n" + APT_LINE,
-    "<b>📬 오늘 접수 (시작·마감)</b>\n" + LH_DUE_LINE,
-    "<b>⏰ 내일 마감</b>\n" + LH_DUE_LINE,
+    "<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n" + APT_REPEAT,
+    "<b>📬 오늘 접수 (시작·마감)</b>\n" + LH_REPEAT,
+    "<b>⏰ 내일 마감</b>\n" + LH_REPEAT,
 ])
 
 
@@ -895,7 +930,9 @@ class MainTest(unittest.TestCase):
 
         text = self.posts[1][1]["text"]
         self.assertNotIn("🆕", text)
+        self.assertIn("<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n" + APT_LINE, text)
         self.assertIn("<b>📬 오늘 접수 (시작·마감)</b>\n" + LH_DUE_LINE, text)
+        self.assertTrue(text.endswith("<b>⏰ 내일 마감</b>\n" + LH_REPEAT))
         self.assertIn("리포트 내용: 특공 예정 1건 · 오늘 접수 1건 · 내일 마감 1건\n", out)
 
     def test_failed_optional_source_becomes_a_warning(self):

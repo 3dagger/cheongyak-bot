@@ -588,14 +588,21 @@ def format_phase(label, begin, end):
     return "{} {}~{}".format(label, short_date(begin), short_date(end))
 
 
+def notice_title(row):
+    return "[{}] {}".format(html.escape(area_label(row)), html.escape(field(row, "HOUSE_NM") or "이름미상"))
+
+
+def notice_link(row):
+    url = field(row, "PBLANC_URL")
+    return ['<a href="{}">공고</a>'.format(html.escape(url, quote=True))] if url else []
+
+
 def format_line(row, highlight=None):
     """공고 한 건을 텔레그램 HTML로 만듭니다. highlight(시작일, 종료일)가 참인 접수 단계는 굵게 표시합니다.
 
     API에서 온 글자는 모두 이스케이프합니다. 지역·주택 유형·접수 단계명에 <나 &가 섞여 오면
     텔레그램이 메시지를 통째로 거절해 그날 리포트가 가지 않기 때문입니다.
     """
-    area = html.escape(area_label(row))
-    name = html.escape(field(row, "HOUSE_NM") or "이름미상")
     households = to_int(row.get("TOT_SUPLY_HSHLDCO"))
     hh = " {:,}세대".format(households) if households else ""
     details = []
@@ -605,11 +612,9 @@ def format_line(row, highlight=None):
     announced = field(row, "PRZWNER_PRESNATN_DE")
     if ISO_DATE_RE.fullmatch(announced):  # 당첨자 발표일이 같은 단지는 중복 청약이 제한되어, 함께 보이게 합니다.
         details.append("발표 " + short_date(announced))
-    url = field(row, "PBLANC_URL")
-    if url:
-        details.append('<a href="{}">공고</a>'.format(html.escape(url, quote=True)))
+    details += notice_link(row)
     capped = " · 분상제" if field(row, "PARCPRC_ULS_AT") == "Y" else ""  # 분양가상한제 적용 단지입니다.
-    line = "• [{}] {} ({}{}{})".format(area, name, html.escape(house_type(row)), hh, capped)
+    line = "• {} ({}{}{})".format(notice_title(row), html.escape(house_type(row)), hh, capped)
     if details:
         line += "\n   " + " · ".join(details)
     if row.get("_prices"):
@@ -621,8 +626,18 @@ def format_line(row, highlight=None):
     return line
 
 
+def format_repeat(row, relevant):
+    """앞 섹션에 이미 나온 공고를 한 줄로 줄입니다. relevant(시작일, 종료일)가 참인 접수 단계와 링크만 남깁니다."""
+    details = [html.escape(format_phase(label, begin, end))
+               for label, begin, end in phases(row) if relevant(begin, end)]
+    return "• {} — {}".format(notice_title(row), " · ".join(details + notice_link(row)))
+
+
 def build_report(items, today, warnings=(), seen=None):
-    """리포트 본문과 섹션별 건수 [(섹션, 건수)]를 돌려줍니다. 실을 공고가 없으면 건수 목록이 비어 있습니다."""
+    """리포트 본문과 섹션별 건수 [(섹션, 건수)]를 돌려줍니다. 실을 공고가 없으면 건수 목록이 비어 있습니다.
+
+    한 공고가 여러 섹션에 해당하면 처음 나오는 섹션에서만 자세히 쓰고, 그다음부터는 한 줄로 줄입니다.
+    """
     tomorrow = (today + timedelta(days=1)).isoformat()
     today_s = today.isoformat()
     upcoming_until = (today + timedelta(days=UPCOMING_DAYS)).isoformat()
@@ -644,22 +659,32 @@ def build_report(items, today, warnings=(), seen=None):
 
     header = "🏠 <b>청약 데일리 리포트</b> — {} ({})".format(
         today_s, WEEKDAY_KO[today.weekday()])
-    sections, counts = [], []
+    sections, counts, shown = [], [], set()
 
-    def add_section(label, title, rows, highlight=None):
-        if rows:
-            rows = sorted(rows, key=sort_key)
-            sections.append("<b>{}</b>\n{}".format(
-                title, "\n".join(format_line(r, highlight) for r in rows)))
-            counts.append((label, len(rows)))
+    def add_section(label, title, rows, relevant=None, bold=False):
+        """relevant(시작일, 종료일)는 이 섹션에 올라온 이유가 되는 접수 단계를 고릅니다.
+
+        앞 섹션에 나온 공고는 그 단계만 한 줄로 쓰고, bold면 처음 나오는 공고에서도 그 단계를 굵게 표시합니다.
+        """
+        if not rows:
+            return
+        lines = []
+        for row in sorted(rows, key=sort_key):
+            if relevant and row["_id"] in shown:
+                lines.append(format_repeat(row, relevant))
+            else:
+                lines.append(format_line(row, relevant if bold else None))
+                shown.add(row["_id"])
+        sections.append("<b>{}</b>\n{}".format(title, "\n".join(lines)))
+        counts.append((label, len(rows)))
 
     add_section("새 공고", "🆕 새로 올라온 공고 ({})".format(
         "어제~오늘" if seen is None else "지난 리포트 이후"), new_notices)
-    add_section("특공 예정", "👶 신생아·신혼 특공 접수 예정 ({}일 내)".format(UPCOMING_DAYS), family)
+    add_section("특공 예정", "👶 신생아·신혼 특공 접수 예정 ({}일 내)".format(UPCOMING_DAYS), family, starts_soon)
     # 접수는 대부분 하루뿐이라 시작과 마감을 따로 두면 같은 단지가 두 번 나옵니다. 날짜별로 묶고,
     # 그 섹션에 올라온 이유가 된 접수 단계를 굵게 표시합니다.
-    add_section("오늘 접수", "📬 오늘 접수 (시작·마감)", having(due_today), due_today)
-    add_section("내일 마감", "⏰ 내일 마감", having(ends_tomorrow), ends_tomorrow)
+    add_section("오늘 접수", "📬 오늘 접수 (시작·마감)", having(due_today), due_today, bold=True)
+    add_section("내일 마감", "⏰ 내일 마감", having(ends_tomorrow), ends_tomorrow, bold=True)
 
     footer = "".join("\n⚠️ " + html.escape(w) for w in warnings)
     footer = "\n" + footer if footer else ""
