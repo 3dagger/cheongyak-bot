@@ -9,13 +9,46 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  unit:
+    name: unit (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # daily-report가 쓰는 러너 기본 python3입니다. 표준 라이브러리만 쓰므로 설치할 것이 없습니다
+          - name: ubuntu 기본
+            os: ubuntu-latest
+            python: python3
+          # macOS에 들어 있는 python3(지금은 3.9)입니다. README대로 로컬에서 돌릴 때 쓰는, 가장 오래된 환경입니다
+          - name: macOS 기본
+            os: macos-latest
+            python: /usr/bin/python3
+          # 가장 최신 파이썬입니다. 새 버전에서 생기는 경고를 러너 기본 버전이 올라가기 전에 잡습니다
+          - name: 최신
+            os: ubuntu-latest
+            python: python
+            setup: "3.x"
     steps:
       - uses: actions/checkout@v7
 
-      # daily-report 와 같은 러너 기본 python3 로 돌린다 — 표준 라이브러리만 쓰므로 설치할 것이 없다
+      - if: matrix.setup
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.setup }}
+
+      # -W error: 닫지 않은 응답 같은 경고도 실패로 처리합니다
       - name: 단위 테스트
         run: |
-          python3 --version
-          python3 -m unittest discover tests -v
+          ${{ matrix.python }} --version
+          ${{ matrix.python }} -W error -m unittest discover tests -v
+
+  # 저장소 규칙의 필수 체크 이름이 test라서, 위 결과를 이 이름 하나로 모읍니다.
+  # always()가 없으면 unit이 실패했을 때 이 작업이 건너뛰어지고, 건너뛴 필수 체크는 통과로 처리됩니다
+  test:
+    if: always()
+    needs: unit
+    runs-on: ubuntu-latest
+    steps:
+      - name: 모든 환경 통과 확인
+        run: test "${{ needs.unit.result }}" = "success"
