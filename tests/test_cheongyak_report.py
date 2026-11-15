@@ -359,11 +359,18 @@ class FormatTest(unittest.TestCase):
                                         "HOUSE_DETAIL_SECD_NM": "공공지원민간임대"}), "공공지원민간임대")
         self.assertEqual(cr.house_type({"_type": "SH"}), "SH")
 
+    def test_short_date_adds_the_weekday(self):
+        self.assertEqual(cr.short_date("2026-11-13"), "11-13(금)")
+        self.assertEqual(cr.short_date("2027-01-03"), "01-03(일)")
+        # 날짜로 읽히지 않는 값은 요일 없이 그대로 둡니다.
+        self.assertEqual(cr.short_date("2026-02-30"), "02-30")
+        self.assertEqual(cr.short_date("2026-11-05 10:00"), "11-05 10:00")
+
     def test_format_phase(self):
-        self.assertEqual(cr.format_phase("특공", "2026-11-10", "2026-11-10"), "특공 11-10")
-        self.assertEqual(cr.format_phase("1순위", "2026-11-11", "2026-11-12"), "1순위 11-11~11-12")
-        self.assertEqual(cr.format_phase("마감", "", "2026-11-20"), "마감 11-20")
-        self.assertEqual(cr.format_phase("접수", "2026-11-14", ""), "접수 11-14")
+        self.assertEqual(cr.format_phase("특공", "2026-11-10", "2026-11-10"), "특공 11-10(화)")
+        self.assertEqual(cr.format_phase("1순위", "2026-11-11", "2026-11-12"), "1순위 11-11(수)~11-12(목)")
+        self.assertEqual(cr.format_phase("마감", "", "2026-11-20"), "마감 11-20(금)")
+        self.assertEqual(cr.format_phase("접수", "2026-11-14", ""), "접수 11-14(토)")
 
     def test_format_line_escapes_html(self):
         row = {
@@ -375,7 +382,7 @@ class FormatTest(unittest.TestCase):
         }
         self.assertEqual(cr.format_line(row), (
             "• [서울] 래미안 &lt;원베일리&gt; (민영 1,024세대)\n"
-            '   특공 11-10 · 1순위 11-11~11-12 · <a href="https://www.applyhome.co.kr/notice?a=1&amp;b=2">공고</a>\n'
+            '   특공 11-10(화) · 1순위 11-11(수)~11-12(목) · <a href="https://www.applyhome.co.kr/notice?a=1&amp;b=2">공고</a>\n'
             "   👶 신생아 52세대"))
 
     def test_format_line_escapes_every_text_from_the_apis(self):
@@ -386,7 +393,7 @@ class FormatTest(unittest.TestCase):
         }
         self.assertEqual(cr.format_line(row), (
             "• [경기&lt;남부&gt;] A&amp;B 행복주택 (LH 행복주택&lt;청년&gt;)\n"
-            "   고령자&lt;만65세 이상&gt; 11-20~11-21"))
+            "   고령자&lt;만65세 이상&gt; 11-20(금)~11-21(토)"))
 
     def test_format_line_shows_the_city_for_province_notices(self):
         row = {"_type": "APT", "SUBSCRPT_AREA_CODE_NM": "경기", "HOUSE_NM": "X", "HOUSE_DTL_SECD_NM": "민영",
@@ -397,10 +404,10 @@ class FormatTest(unittest.TestCase):
         row = {"_type": "APT", "SUBSCRPT_AREA_CODE_NM": "서울", "HOUSE_NM": "X", "HOUSE_DTL_SECD_NM": "민영",
                "_phases": [("특공", "2026-11-23", "2026-11-23")], "PBLANC_URL": "https://a.example/x"}
         self.assertEqual(cr.format_line(dict(row, PRZWNER_PRESNATN_DE="2026-12-02")),
-                         '• [서울] X (민영)\n   특공 11-23 · 발표 12-02 · <a href="https://a.example/x">공고</a>')
+                         '• [서울] X (민영)\n   특공 11-23(월) · 발표 12-02(수) · <a href="https://a.example/x">공고</a>')
         for missing in ("", "미정", "추후 공지"):
             self.assertEqual(cr.format_line(dict(row, PRZWNER_PRESNATN_DE=missing)),
-                             '• [서울] X (민영)\n   특공 11-23 · <a href="https://a.example/x">공고</a>')
+                             '• [서울] X (민영)\n   특공 11-23(월) · <a href="https://a.example/x">공고</a>')
 
     def test_format_line_marks_price_capped_notices(self):
         row = {"_type": "APT", "SUBSCRPT_AREA_CODE_NM": "서울", "HOUSE_NM": "X", "HOUSE_DTL_SECD_NM": "국민",
@@ -430,9 +437,9 @@ class FormatTest(unittest.TestCase):
         row = {"_type": "APT", "SUBSCRPT_AREA_CODE_NM": "서울", "HOUSE_NM": "X", "HOUSE_DTL_SECD_NM": "민영",
                "_phases": [("특공", "2026-11-23", "2026-11-23")], "_prices": [(59, 98000), (84, 132000)],
                "_special": {"신생아": 3}}
-        self.assertEqual(cr.format_line(row), "• [서울] X (민영)\n   특공 11-23\n"
+        self.assertEqual(cr.format_line(row), "• [서울] X (민영)\n   특공 11-23(월)\n"
                                               "   💰 최고가 59㎡ 9.8억 · 84㎡ 13.2억\n   👶 신생아 3세대")
-        self.assertEqual(cr.format_line(dict(row, _prices=[])), "• [서울] X (민영)\n   특공 11-23\n   👶 신생아 3세대")
+        self.assertEqual(cr.format_line(dict(row, _prices=[])), "• [서울] X (민영)\n   특공 11-23(월)\n   👶 신생아 3세대")
 
     def test_format_line_with_missing_fields(self):
         self.assertEqual(cr.format_line({"_type": "SH", "_phases": []}), "• [지역미상] 이름미상 (SH)")
@@ -741,12 +748,12 @@ class LoadConfigTest(unittest.TestCase):
 
 
 LH_LINE = ("• [경기] 화성동탄 행복주택 (LH 행복주택)\n"
-           '   일반 11-13~11-14 · <a href="https://apply.lh.or.kr/notice">공고</a>')
+           '   일반 11-13(금)~11-14(토) · <a href="https://apply.lh.or.kr/notice">공고</a>')
 SH_LINE = ("• [서울] 고덕강일 입주자 모집 공고 (SH 분양)\n"
            '   <a href="https://www.i-sh.co.kr/app/lay2/program/S1T294C297/www/brd/m_247/view.do'
            '?multi_itm_seq=1&amp;seq=301">공고</a>')
 APT_LINE = ("• [서울] 테스트자이 (민영 1,024세대 · 분상제)\n"
-            '   특공 11-20 · 1순위 11-23 · 발표 12-02 · <a href="https://www.applyhome.co.kr/x">공고</a>\n'
+            '   특공 11-20(금) · 1순위 11-23(월) · 발표 12-02(수) · <a href="https://www.applyhome.co.kr/x">공고</a>\n'
             "   💰 최고가 59㎡ 9.8억 · 84㎡ 13.2억\n"
             "   👶 신생아 3세대 · 신혼 5세대")
 FIRST_REPORT = "\n\n".join([
