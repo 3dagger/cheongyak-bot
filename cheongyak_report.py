@@ -571,12 +571,21 @@ def house_type(row):
     return field(row, "HOUSE_DTL_SECD_NM", "HOUSE_DETAIL_SECD_NM") or row["_type"]
 
 
+def short_date(day):
+    """YYYY-MM-DD를 '11-16(월)'처럼 월-일과 요일로 줄입니다. 날짜로 읽히지 않으면 연도만 뗍니다."""
+    try:
+        weekday = datetime.strptime(day, "%Y-%m-%d").weekday()
+    except ValueError:
+        return day[5:]
+    return "{}({})".format(day[5:], WEEKDAY_KO[weekday])
+
+
 def format_phase(label, begin, end):
     if not begin:
-        return "{} {}".format(label, end[5:])
+        return "{} {}".format(label, short_date(end))
     if not end or begin == end:
-        return "{} {}".format(label, begin[5:])
-    return "{} {}~{}".format(label, begin[5:], end[5:])
+        return "{} {}".format(label, short_date(begin))
+    return "{} {}~{}".format(label, short_date(begin), short_date(end))
 
 
 def format_line(row):
@@ -592,7 +601,7 @@ def format_line(row):
     details = [html.escape(format_phase(*phase)) for phase in phases(row)]
     announced = field(row, "PRZWNER_PRESNATN_DE")
     if ISO_DATE_RE.fullmatch(announced):  # 당첨자 발표일이 같은 단지는 중복 청약이 제한되어, 함께 보이게 합니다.
-        details.append("발표 " + announced[5:])
+        details.append("발표 " + short_date(announced))
     url = field(row, "PBLANC_URL")
     if url:
         details.append('<a href="{}">공고</a>'.format(html.escape(url, quote=True)))
