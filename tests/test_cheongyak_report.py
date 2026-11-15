@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""cheongyak_report 의 순수 함수 테스트입니다. 네트워크·텔레그램은 호출하지 않습니다.
+"""cheongyak_report 테스트입니다. 네트워크·텔레그램은 실제로 호출하지 않습니다.
+
+대부분 순수 함수 테스트이고, MainTest만 네트워크를 가짜로 바꿔 main()을 처음부터 끝까지 돌립니다.
 
 실행(레포 루트에서): python3 -W error -m unittest discover tests
 """
@@ -8,6 +10,7 @@ import contextlib
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 import urllib.error
@@ -595,6 +598,183 @@ class LoadConfigTest(unittest.TestCase):
                 cfg = cr.load_config()
         self.assertEqual(cfg, {"CHEONGYAK_SERVICE_KEY": "abc==", "TELEGRAM_CHAT_ID": "999",
                                "AREA_FILTER": "서울,경기"})
+
+
+LH_LINE = ("• [경기] 화성동탄 행복주택 (LH 행복주택)\n"
+           '   일반 11-13~11-14 · <a href="https://apply.lh.or.kr/notice">공고</a>')
+SH_LINE = ("• [서울] 고덕강일 입주자 모집 공고 (SH 분양)\n"
+           '   <a href="https://www.i-sh.co.kr/app/lay2/program/S1T294C297/www/brd/m_247/view.do'
+           '?multi_itm_seq=1&amp;seq=301">공고</a>')
+APT_LINE = ("• [서울] 테스트자이 (민영 1,024세대)\n"
+            '   특공 11-20 · 1순위 11-23 · <a href="https://www.applyhome.co.kr/x">공고</a>\n'
+            "   👶 신생아 3세대 · 신혼 5세대")
+FIRST_REPORT = "\n\n".join([
+    "🏠 <b>청약 데일리 리포트</b> — 2026-11-13 (금)",
+    "<b>🆕 새로 올라온 공고 (어제~오늘)</b>\n" + "\n".join([LH_LINE, SH_LINE, APT_LINE]),
+    "<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n" + APT_LINE,
+    "<b>📬 오늘 접수 시작</b>\n" + LH_LINE,
+    "<b>⏰ 마감 임박 (오늘·내일)</b>\n" + LH_LINE,
+])
+
+
+class MainTest(unittest.TestCase):
+    """main()을 처음부터 끝까지 돌립니다. 네트워크만 가짜이고 조회·필터·리포트·기록은 실제 코드를 탑니다."""
+
+    ENV = {"CHEONGYAK_SERVICE_KEY": "KEY", "TELEGRAM_BOT_TOKEN": "TOKEN", "TELEGRAM_CHAT_ID": "42",
+           "AREA_FILTER": "서울,경기,인천"}
+    APT = {
+        "HOUSE_MANAGE_NO": "2026000101", "PBLANC_NO": "2026000101", "HOUSE_NM": "테스트자이",
+        "HOUSE_SECD_NM": "APT", "HOUSE_DTL_SECD_NM": "민영", "SUBSCRPT_AREA_CODE_NM": "서울",
+        "RCRIT_PBLANC_DE": "2026-11-12", "TOT_SUPLY_HSHLDCO": 1024,
+        "SPSPLY_RCEPT_BGNDE": "2026-11-20", "SPSPLY_RCEPT_ENDDE": "2026-11-20",
+        "GNRL_RNK1_CRSPAREA_RCPTDE": "2026-11-23", "GNRL_RNK1_CRSPAREA_ENDDE": "2026-11-23",
+        "PBLANC_URL": "https://www.applyhome.co.kr/x",
+    }
+    LH = {
+        "PAN_ID": "2015122300012345", "CNP_CD_NM": "경기도", "PAN_NM": "화성동탄 행복주택",
+        "AIS_TP_CD_NM": "행복주택", "PAN_NT_ST_DT": "2026.11.12", "CLSG_DT": "2026.11.14",
+        "DTL_URL": "https://apply.lh.or.kr/notice", "UPP_AIS_TP_CD": "06",
+    }
+    LH_SCHEDULE = [{"HS_SBSC_ACP_TRG_CD_NM": "일반공급", "ACP_DTTM": "2026.11.13 10:00 ~ 2026.11.14 17:00"}]
+    SEEN = {"APT:2026000101:2026000101": "2026-11-13", "LH:2015122300012345": "2026-11-13",
+            "SH:1:301": "2026-11-13"}
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.seen_path = Path(tmp.name) / ".state" / "seen.json"
+        self.down = set()  # 응답하지 않는 것으로 칠 출처입니다: "applyhome", "lh"
+        self.posts = []
+        patchers = [
+            mock.patch.object(cr, "ENV_PATH", Path(tmp.name) / ".env"),
+            mock.patch.object(cr, "SEEN_PATH", self.seen_path),
+            mock.patch.object(cr, "today_kst", return_value=TODAY),
+            mock.patch.object(cr, "http_post_json", side_effect=self.fake_post),
+            mock.patch("urllib.request.urlopen",
+                       side_effect=AssertionError("테스트가 실제 네트워크를 호출했습니다")),
+        ]
+        for patcher in patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(cr, "http_get", side_effect=self.fake_get)
+        self.http_get = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def fake_get(self, url, params=None, retries=3):
+        params = params or {}
+        if url.startswith(cr.API_BASE):
+            if "applyhome" in self.down:
+                raise OSError("청약홈 응답 없음")
+            endpoint = url.rsplit("/", 1)[1]
+            if endpoint == "getAPTLttotPblancDetail":
+                return json.dumps({"data": [self.APT]})
+            if endpoint == "getAPTLttotPblancMdl":
+                return json.dumps({"data": [{"NWBB_HSHLDCO": 3, "NWWDS_HSHLDCO": 5}]})
+            return json.dumps({"data": []})
+        if url == cr.LH_LIST_URL:
+            if "lh" in self.down:
+                raise OSError("timed out")
+            rows = [self.LH] if params["UPP_AIS_TP_CD"] == "06" else []
+            return json.dumps([{"dsSch": [{}]}, {"dsList": rows}])
+        if url == cr.LH_DETAIL_URL:
+            return json.dumps([{"dsSplScdl": self.LH_SCHEDULE}, {"dsEtcInfo": []}])
+        if url == cr.SH_BOARD_URL.format("list"):
+            title = "고덕강일 입주자 모집 공고" if params["multi_itm_seq"] == "1" else "임대료 납부 안내"
+            return "<table><tbody>{}</tbody></table>".format(ParseShBoardTest.tr("301", title, "2026-11-12"))
+        raise AssertionError("예상하지 못한 주소입니다: " + url)
+
+    def fake_post(self, url, payload):
+        self.posts.append((url, payload))
+        return {"ok": True}
+
+    def run_main(self, *argv, **env):
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["cheongyak_report.py"] + list(argv)), \
+                mock.patch.dict(os.environ, dict(self.ENV, **env), clear=True), \
+                contextlib.redirect_stdout(out):
+            cr.main()
+        return out.getvalue()
+
+    def saved_seen(self):
+        return json.loads(self.seen_path.read_text(encoding="utf-8"))
+
+    def test_sends_the_report_and_records_the_notices(self):
+        out = self.run_main()
+
+        self.assertEqual(len(self.posts), 1)
+        url, payload = self.posts[0]
+        self.assertEqual(url, "https://api.telegram.org/botTOKEN/sendMessage")
+        self.assertEqual((payload["chat_id"], payload["parse_mode"]), ("42", "HTML"))
+        self.assertEqual(payload["text"], FIRST_REPORT)
+        self.assertEqual(self.saved_seen(), self.SEEN)
+        self.assertEqual(out, "2026-11-13 리포트 전송 완료 (공고 3건 조회)\n"
+                              "리포트 내용: 새 공고 3건 · 특공 예정 1건 · 오늘 접수 시작 1건 · 마감 임박 1건\n")
+
+    def test_dry_run_prints_without_sending_or_recording(self):
+        self.assertEqual(self.run_main("--dry-run"), FIRST_REPORT + "\n")
+        self.assertEqual(self.posts, [])
+        self.assertFalse(self.seen_path.exists())
+
+    def test_next_run_does_not_repeat_notices_already_reported(self):
+        self.run_main()
+        out = self.run_main()
+
+        text = self.posts[1][1]["text"]
+        self.assertNotIn("🆕", text)
+        self.assertIn("<b>📬 오늘 접수 시작</b>\n" + LH_LINE, text)
+        self.assertIn("리포트 내용: 특공 예정 1건 · 오늘 접수 시작 1건 · 마감 임박 1건\n", out)
+
+    def test_failed_optional_source_becomes_a_warning(self):
+        self.down = {"lh"}
+
+        out = self.run_main()
+
+        text = self.posts[0][1]["text"]
+        self.assertNotIn("화성동탄", text)
+        self.assertIn(APT_LINE, text)
+        self.assertTrue(text.endswith("\n\n⚠️ LH 조회 실패: timed out"))
+        self.assertTrue(out.endswith("⚠️ LH 조회 실패: timed out\n"))
+        self.assertEqual(sorted(self.saved_seen()), ["APT:2026000101:2026000101", "SH:1:301"])
+
+    def test_quiet_day_is_sent_unless_send_when_empty_is_false(self):
+        out = self.run_main(AREA_FILTER="부산", SEND_WHEN_EMPTY="false")
+        self.assertEqual(self.posts, [])
+        self.assertEqual(out, "새 소식 없음, 전송 생략 (SEND_WHEN_EMPTY=false)\n")
+        self.assertEqual(self.saved_seen(), {})
+
+        self.run_main(AREA_FILTER="부산")
+        self.assertEqual(self.posts[0][1]["text"], "🏠 <b>청약 데일리 리포트</b> — 2026-11-13 (금)\n\n"
+                                                   "오늘은 새로운 공고·접수 소식이 없습니다.")
+
+    def test_applyhome_failure_stops_the_run_without_sending_or_recording(self):
+        self.down = {"applyhome"}
+        with self.assertRaises(OSError):
+            self.run_main()
+        self.assertEqual(self.posts, [])
+        self.assertFalse(self.seen_path.exists())
+
+    def test_missing_setting_exits_before_any_request(self):
+        with self.assertRaises(SystemExit) as ctx:
+            self.run_main(TELEGRAM_CHAT_ID="")
+        self.assertEqual(str(ctx.exception), "[설정 필요] .env에 다음 값이 비어 있습니다: TELEGRAM_CHAT_ID")
+        self.assertEqual(self.http_get.call_count, 0)
+        self.assertEqual(self.posts, [])
+
+    def notify(self, *argv, **env):
+        with mock.patch.object(sys, "argv", ["cheongyak_report.py"] + list(argv)), \
+                mock.patch.dict(os.environ, dict(self.ENV, **env), clear=True):
+            cr.notify_failure(OSError("<청약홈> 응답 없음"))
+
+    def test_failure_notice_names_the_error_and_links_the_run_log(self):
+        self.notify(GITHUB_RUN_ID="123", GITHUB_REPOSITORY="me/cheongyak-bot")
+        self.assertEqual(self.posts[0][1]["text"],
+                         "❗ <b>청약 리포트 생성 실패</b>\nOSError: &lt;청약홈&gt; 응답 없음\n"
+                         '<a href="https://github.com/me/cheongyak-bot/actions/runs/123">실행 로그</a>')
+
+    def test_failure_notice_is_skipped_on_dry_run_or_without_a_chat(self):
+        self.notify("--dry-run")
+        self.notify(TELEGRAM_CHAT_ID="")
+        self.assertEqual(self.posts, [])
 
 
 if __name__ == "__main__":
