@@ -393,6 +393,15 @@ class FormatTest(unittest.TestCase):
                "HSSPLY_ADRES": "경기도 의정부시 의정부동 224-5번지 일원", "_phases": []}
         self.assertEqual(cr.format_line(row), "• [경기 의정부시] X (민영)")
 
+    def test_format_line_shows_the_winner_announcement_date_after_the_phases(self):
+        row = {"_type": "APT", "SUBSCRPT_AREA_CODE_NM": "서울", "HOUSE_NM": "X", "HOUSE_DTL_SECD_NM": "민영",
+               "_phases": [("특공", "2026-11-23", "2026-11-23")], "PBLANC_URL": "https://a.example/x"}
+        self.assertEqual(cr.format_line(dict(row, PRZWNER_PRESNATN_DE="2026-12-02")),
+                         '• [서울] X (민영)\n   특공 11-23 · 발표 12-02 · <a href="https://a.example/x">공고</a>')
+        for missing in ("", "미정", "추후 공지"):
+            self.assertEqual(cr.format_line(dict(row, PRZWNER_PRESNATN_DE=missing)),
+                             '• [서울] X (민영)\n   특공 11-23 · <a href="https://a.example/x">공고</a>')
+
     def test_format_line_with_missing_fields(self):
         self.assertEqual(cr.format_line({"_type": "SH", "_phases": []}), "• [지역미상] 이름미상 (SH)")
 
@@ -672,7 +681,7 @@ SH_LINE = ("• [서울] 고덕강일 입주자 모집 공고 (SH 분양)\n"
            '   <a href="https://www.i-sh.co.kr/app/lay2/program/S1T294C297/www/brd/m_247/view.do'
            '?multi_itm_seq=1&amp;seq=301">공고</a>')
 APT_LINE = ("• [서울] 테스트자이 (민영 1,024세대)\n"
-            '   특공 11-20 · 1순위 11-23 · <a href="https://www.applyhome.co.kr/x">공고</a>\n'
+            '   특공 11-20 · 1순위 11-23 · 발표 12-02 · <a href="https://www.applyhome.co.kr/x">공고</a>\n'
             "   👶 신생아 3세대 · 신혼 5세대")
 FIRST_REPORT = "\n\n".join([
     "🏠 <b>청약 데일리 리포트</b> — 2026-11-13 (금)",
@@ -694,7 +703,7 @@ class MainTest(unittest.TestCase):
         "RCRIT_PBLANC_DE": "2026-11-12", "TOT_SUPLY_HSHLDCO": 1024,
         "SPSPLY_RCEPT_BGNDE": "2026-11-20", "SPSPLY_RCEPT_ENDDE": "2026-11-20",
         "GNRL_RNK1_CRSPAREA_RCPTDE": "2026-11-23", "GNRL_RNK1_CRSPAREA_ENDDE": "2026-11-23",
-        "PBLANC_URL": "https://www.applyhome.co.kr/x",
+        "PRZWNER_PRESNATN_DE": "20261202", "PBLANC_URL": "https://www.applyhome.co.kr/x",
     }
     LH = {
         "PAN_ID": "2015122300012345", "CNP_CD_NM": "경기도", "PAN_NM": "화성동탄 행복주택",

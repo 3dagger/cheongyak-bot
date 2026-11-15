@@ -75,6 +75,7 @@ SH_BOARDS = (("1", "SH 분양"), ("2", "SH 임대"))
 SH_EXCLUDE = ("당첨", "결과", "명단", "발표", "동호", "서류")
 SH_ROW_RE = re.compile(r"getDetailView\('(\d+)'\).*?>(.*?)</a>.*?(\d{4}-\d{2}-\d{2})", re.S)
 
+ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 KST = timezone(timedelta(hours=9))
 WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
 REGION_NAMES = (
@@ -553,6 +554,9 @@ def format_line(row):
     households = to_int(row.get("TOT_SUPLY_HSHLDCO"))
     hh = " {:,}세대".format(households) if households else ""
     details = [html.escape(format_phase(*phase)) for phase in phases(row)]
+    announced = field(row, "PRZWNER_PRESNATN_DE")
+    if ISO_DATE_RE.fullmatch(announced):  # 당첨자 발표일이 같은 단지는 중복 청약이 제한되어, 함께 보이게 합니다.
+        details.append("발표 " + announced[5:])
     url = field(row, "PBLANC_URL")
     if url:
         details.append('<a href="{}">공고</a>'.format(html.escape(url, quote=True)))
