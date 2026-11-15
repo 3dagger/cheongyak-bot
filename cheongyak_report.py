@@ -653,6 +653,20 @@ def cmd_get_chat_id(cfg):
             print("chat_id: {}  ({})".format(cid, name))
 
 
+def missing_config_message(missing):
+    """비어 있는 설정을 어디에 넣어야 하는지 알려 줍니다.
+
+    GitHub Actions에서는 .env가 아니라 레포 Secrets에서 값을 받습니다. 포크에는 원본 레포의 Secrets가
+    따라오지 않아, 포크한 뒤 첫 실행이 여기서 멈추는 일이 많습니다.
+    """
+    names = ", ".join(missing)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        # ::error:: 로 찍으면 로그를 열지 않아도 실행 페이지의 Annotations에 이유가 보입니다.
+        return ("::error title=청약 리포트 설정::레포 Secrets에 다음 값이 없습니다: {}. "
+                "Settings → Secrets and variables → Actions에서 등록해 주세요.".format(names))
+    return "[설정 필요] .env에 다음 값이 비어 있습니다: " + names
+
+
 def parse_args(argv):
     """명령줄 옵션을 읽습니다. 모르는 옵션은 리포트를 보내지 않고 사용법과 함께 끝냅니다."""
     parser = argparse.ArgumentParser(
@@ -688,7 +702,7 @@ def main():
                               ("TELEGRAM_BOT_TOKEN", token),
                               ("TELEGRAM_CHAT_ID", chat_id)) if not v]
     if missing and not (args.dry_run and service_key):
-        sys.exit("[설정 필요] .env에 다음 값이 비어 있습니다: " + ", ".join(missing))
+        sys.exit(missing_config_message(missing))
 
     today = today_kst()
     since = today - timedelta(days=45)
