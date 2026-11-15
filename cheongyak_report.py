@@ -544,6 +544,7 @@ def format_line(row):
 
 
 def build_report(items, today, warnings=(), seen=None):
+    """리포트 본문과 섹션별 건수 [(섹션, 건수)]를 돌려줍니다. 실을 공고가 없으면 건수 목록이 비어 있습니다."""
     tomorrow = (today + timedelta(days=1)).isoformat()
     today_s = today.isoformat()
     upcoming_until = (today + timedelta(days=UPCOMING_DAYS)).isoformat()
@@ -556,25 +557,42 @@ def build_report(items, today, warnings=(), seen=None):
 
     header = "🏠 <b>청약 데일리 리포트</b> — {} ({})".format(
         today_s, WEEKDAY_KO[today.weekday()])
-    sections = []
+    sections, counts = [], []
 
-    def add_section(title, rows):
+    def add_section(label, title, rows):
         if rows:
             rows = sorted(rows, key=sort_key)
             sections.append("<b>{}</b>\n{}".format(
                 title, "\n".join(format_line(r) for r in rows)))
+            counts.append((label, len(rows)))
 
-    add_section("🆕 새로 올라온 공고 ({})".format(
+    add_section("새 공고", "🆕 새로 올라온 공고 ({})".format(
         "어제~오늘" if seen is None else "지난 리포트 이후"), new_notices)
-    add_section("👶 신생아·신혼 특공 접수 예정 ({}일 내)".format(UPCOMING_DAYS), family)
-    add_section("📬 오늘 접수 시작", opening)
-    add_section("⏰ 마감 임박 (오늘·내일)", closing)
+    add_section("특공 예정", "👶 신생아·신혼 특공 접수 예정 ({}일 내)".format(UPCOMING_DAYS), family)
+    add_section("오늘 접수 시작", "📬 오늘 접수 시작", opening)
+    add_section("마감 임박", "⏰ 마감 임박 (오늘·내일)", closing)
 
     footer = "".join("\n⚠️ " + html.escape(w) for w in warnings)
     footer = "\n" + footer if footer else ""
     if not sections:
-        return header + "\n\n오늘은 새로운 공고·접수 소식이 없습니다." + footer, False
-    return header + "\n\n" + "\n\n".join(sections) + footer, True
+        return header + "\n\n오늘은 새로운 공고·접수 소식이 없습니다." + footer, counts
+    return header + "\n\n" + "\n\n".join(sections) + footer, counts
+
+
+def log_warnings(warnings):
+    """리포트 아래에 붙인 경고를 실행 로그에도 남깁니다.
+
+    로그에는 전송 완료 한 줄만 남아서, 경고가 있었는지는 받은 메시지를 봐야 알 수 있었습니다.
+    GitHub Actions에서는 실행 페이지의 Annotations에 경고로 표시됩니다.
+    """
+    in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
+    for warning in warnings:
+        if in_actions:
+            # 워크플로 명령은 한 줄이어야 하므로 줄바꿈과 %를 Actions 규칙대로 바꿉니다.
+            print("::warning title=청약 리포트::" + warning.replace("%", "%25")
+                  .replace("\r", "%0D").replace("\n", "%0A"))
+        else:
+            print("⚠️ " + warning)
 
 
 def split_message(text, limit=3800):
@@ -702,17 +720,19 @@ def main():
     items = merge_lh_into_applyhome(items)
 
     seen = load_seen()
-    report, has_news = build_report(items, today, warnings, seen)
+    report, counts = build_report(items, today, warnings, seen)
 
     if args.dry_run:
         print(report)
         return
 
-    if not has_news and cfg.get("SEND_WHEN_EMPTY", "true").lower() == "false":
+    if not counts and cfg.get("SEND_WHEN_EMPTY", "true").lower() == "false":
         print("새 소식 없음, 전송 생략 (SEND_WHEN_EMPTY=false)")
     else:
         send_telegram(token, chat_id, report)
         print("{} 리포트 전송 완료 (공고 {}건 조회)".format(today.isoformat(), len(items)))
+        print("리포트 내용: " + (" · ".join("{} {}건".format(*count) for count in counts) or "소식 없음"))
+    log_warnings(warnings)
     save_seen(seen, items, today)
 
 
