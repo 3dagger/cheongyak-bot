@@ -560,7 +560,8 @@ def format_line(row):
     url = field(row, "PBLANC_URL")
     if url:
         details.append('<a href="{}">공고</a>'.format(html.escape(url, quote=True)))
-    line = "• [{}] {} ({}{})".format(area, name, html.escape(house_type(row)), hh)
+    capped = " · 분상제" if field(row, "PARCPRC_ULS_AT") == "Y" else ""  # 분양가상한제 적용 단지입니다.
+    line = "• [{}] {} ({}{}{})".format(area, name, html.escape(house_type(row)), hh, capped)
     if details:
         line += "\n   " + " · ".join(details)
     if has_family_quota(row):
