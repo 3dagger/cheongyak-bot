@@ -325,7 +325,9 @@ class FormatTest(unittest.TestCase):
                                         "HOUSE_DTL_SECD_NM": "국민"}), "신혼희망타운 국민")
         self.assertEqual(cr.house_type({"_type": "APT"}), "APT")
         self.assertEqual(cr.house_type({"_type": "오피스텔 등",
-                                        "HOUSE_DETAIL_SECD_NM": "오피스텔"}), "오피스텔")
+                                        "HOUSE_DTL_SECD_NM": "도시형생활주택"}), "도시형생활주택")
+        self.assertEqual(cr.house_type({"_type": "공공지원 민간임대",
+                                        "HOUSE_DETAIL_SECD_NM": "공공지원민간임대"}), "공공지원민간임대")
         self.assertEqual(cr.house_type({"_type": "SH"}), "SH")
 
     def test_format_phase(self):
@@ -469,6 +471,26 @@ class HttpGetRetryTest(unittest.TestCase):
                 cr.http_get("https://example.invalid")
         self.assertEqual((ctx.exception.code, str(ctx.exception)), (403, "HTTP Error 403: Forbidden"))
         self.assertEqual([body.closed for body in bodies], [True, True, True])
+
+
+class FetchNoticesTest(unittest.TestCase):
+    @staticmethod
+    def notice(number, name, kind, posted):
+        return {"HOUSE_MANAGE_NO": number, "PBLANC_NO": number, "HOUSE_NM": name,
+                "HOUSE_DTL_SECD_NM": kind, "RCRIT_PBLANC_DE": posted}
+
+    def test_officetels_are_dropped_but_other_types_from_the_same_endpoint_stay(self):
+        def fake(url, params):
+            if not url.endswith("/getUrbtyOfctlLttotPblancDetail"):
+                return {"data": []}
+            return {"data": [self.notice("1", "A 오피스텔", "오피스텔", "2026-11-10"),
+                             self.notice("2", "B 도시형", "도시형생활주택", "2026-11-10"),
+                             self.notice("3", "C 민간임대", "민간임대", "2026-09-01")]}
+
+        with mock.patch.object(cr, "http_get_json", side_effect=fake):
+            rows = cr.fetch_notices("KEY", TODAY - timedelta(days=45))
+
+        self.assertEqual([(r["_id"], r["HOUSE_NM"]) for r in rows], [("오피스텔 등:2:2", "B 도시형")])
 
 
 class LookupEachTest(unittest.TestCase):
