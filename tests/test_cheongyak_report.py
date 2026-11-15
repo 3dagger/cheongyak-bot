@@ -379,9 +379,9 @@ class BuildReportTest(unittest.TestCase):
         closing = self.row("closing", "인천", [("접수", "2026-11-10", "2026-11-14")])
         seen = {"opening": "2026-11-01", "closing": "2026-11-01"}
 
-        report, has_news = cr.build_report([new, opening, closing], TODAY, seen=seen)
+        report, counts = cr.build_report([new, opening, closing], TODAY, seen=seen)
 
-        self.assertTrue(has_news)
+        self.assertEqual(counts, [("새 공고", 1), ("특공 예정", 1), ("오늘 접수 시작", 1), ("마감 임박", 2)])
         self.assertTrue(report.startswith("🏠 <b>청약 데일리 리포트</b> — 2026-11-13 (금)\n\n"))
         titles = [line for line in report.split("\n") if line.startswith("<b>")]
         self.assertEqual(titles, [
@@ -403,11 +403,30 @@ class BuildReportTest(unittest.TestCase):
         self.assertIn("<b>🆕 새로 올라온 공고 (어제~오늘)</b>", report)
 
     def test_empty_report_with_warning(self):
-        report, has_news = cr.build_report([], TODAY, ["LH 조회 실패: <timeout>"])
-        self.assertFalse(has_news)
+        report, counts = cr.build_report([], TODAY, ["LH 조회 실패: <timeout>"])
+        self.assertEqual(counts, [])
         self.assertEqual(report, "🏠 <b>청약 데일리 리포트</b> — 2026-11-13 (금)\n\n"
                                  "오늘은 새로운 공고·접수 소식이 없습니다.\n\n"
                                  "⚠️ LH 조회 실패: &lt;timeout&gt;")
+
+
+class LogWarningsTest(unittest.TestCase):
+    @staticmethod
+    def logged(warnings, env):
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(out):
+            cr.log_warnings(warnings)
+        return out.getvalue()
+
+    def test_plain_lines_outside_github_actions(self):
+        self.assertEqual(self.logged(["LH 조회 실패: timed out", "SH 조회 실패: x"], {}),
+                         "⚠️ LH 조회 실패: timed out\n⚠️ SH 조회 실패: x\n")
+        self.assertEqual(self.logged([], {}), "")
+
+    def test_annotations_in_github_actions_stay_on_one_line(self):
+        self.assertEqual(
+            self.logged(["LH 조회 실패: 100% 응답 없음\n::error::가짜 명령"], {"GITHUB_ACTIONS": "true"}),
+            "::warning title=청약 리포트::LH 조회 실패: 100%25 응답 없음%0A::error::가짜 명령\n")
 
 
 class SplitMessageTest(unittest.TestCase):
