@@ -497,6 +497,27 @@ class SplitMessageTest(unittest.TestCase):
         self.assertTrue(all(len(c) <= 40 for c in chunks))
         self.assertEqual("\n".join(chunks), text)
 
+    def test_a_notice_stays_in_one_message_and_a_title_is_not_left_alone(self):
+        notices = ["• [서울] 단지{}\n   특공 11-16 · 1순위 11-17\n   👶 신생아 3세대".format(n) for n in range(6)]
+        text = "\n\n".join(["🏠 <b>리포트</b>",
+                             "<b>🆕 새 공고</b>\n" + "\n".join(notices[:3]),
+                             "<b>⏰ 마감 임박</b>\n" + "\n".join(notices[3:])])
+        lines = [line for line in text.split("\n") if line]
+        for limit in range(64, 200, 7):  # 제목과 첫 공고를 합친 길이(61자)보다는 커야 한 덩어리로 둘 수 있습니다.
+            chunks = cr.split_message(text, limit=limit)
+            with self.subTest(limit=limit):
+                self.assertEqual([line for chunk in chunks for line in chunk.split("\n") if line], lines)
+                self.assertTrue(all(len(c) <= limit for c in chunks), chunks)
+                self.assertFalse([c for c in chunks if c.startswith(" ")], "공고 중간에서 끊겼습니다")
+                self.assertFalse([c for c in chunks if c.split("\n")[-1].startswith("<b>")],
+                                 "섹션 제목이 메시지 끝에 혼자 남았습니다")
+
+    def test_a_notice_longer_than_the_limit_is_still_split_by_lines(self):
+        text = "<b>제목</b>\n• 단지\n   " + "가" * 30 + "\n   " + "나" * 30
+        chunks = cr.split_message(text, limit=40)
+        self.assertTrue(all(len(c) <= 40 for c in chunks), chunks)
+        self.assertEqual("\n".join(chunks), text)
+
     def test_line_longer_than_limit_is_cut_without_empty_chunks(self):
         for text in ("x" * 50 + "\nshort", "aaa\n" + "y" * 45 + "\nbbb"):
             chunks = cr.split_message(text, limit=20)

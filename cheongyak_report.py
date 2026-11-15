@@ -623,23 +623,48 @@ def log_warnings(warnings):
             print("⚠️ " + warning)
 
 
+def notice_blocks(text):
+    """메시지를 끊어도 되는 단위로 묶습니다. 들여쓴 줄은 앞의 • 줄에, 섹션 제목은 바로 다음 공고에 붙입니다."""
+    blocks = []
+    for line in text.split("\n"):
+        lone_title = bool(blocks) and blocks[-1].startswith("<b>") and "\n" not in blocks[-1]
+        if blocks and (line.startswith(" ") or lone_title):
+            blocks[-1] += "\n" + line
+        else:
+            blocks.append(line)
+    return blocks
+
+
 def split_message(text, limit=3800):
-    """텔레그램 한도(4096자) 안으로 줄 단위로 나눕니다. limit보다 긴 줄은 잘라서 나눕니다."""
+    """텔레그램 한도(4096자) 안으로 나눕니다.
+
+    공고 한 건(• 줄과 그 아래 들여쓴 줄)은 한 메시지에 두고, 섹션 제목이 메시지 끝에 혼자 남지 않게 합니다.
+    한 건이 limit보다 길면 줄 단위로, 한 줄이 limit보다 길면 잘라서 나눕니다.
+    """
     if len(text) <= limit:
         return [text]
     chunks, current = [], ""
-    for line in text.split("\n"):
-        while len(line) > limit:
-            if current:
-                chunks.append(current)
-                current = ""
-            chunks.append(line[:limit])
-            line = line[limit:]
-        if current and len(current) + len(line) + 1 > limit:
+
+    def add(piece):
+        nonlocal current
+        if current and len(current) + len(piece) + 1 > limit:
             chunks.append(current)
-            current = line
+            current = piece
         else:
-            current = current + "\n" + line if current else line
+            current = current + "\n" + piece if current else piece
+
+    for block in notice_blocks(text):
+        if len(block) <= limit:
+            add(block)
+            continue
+        for line in block.split("\n"):
+            while len(line) > limit:
+                if current:
+                    chunks.append(current)
+                    current = ""
+                chunks.append(line[:limit])
+                line = line[limit:]
+            add(line)
     if current:
         chunks.append(current)
     return chunks
