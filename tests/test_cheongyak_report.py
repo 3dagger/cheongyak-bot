@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """cheongyak_report 의 순수 함수 테스트입니다. 네트워크·텔레그램은 호출하지 않습니다.
 
-실행(레포 루트에서): python3 -m unittest discover tests
+실행(레포 루트에서): python3 -W error -m unittest discover tests
 """
 
 import contextlib
@@ -518,8 +518,9 @@ class TelegramErrorTest(unittest.TestCase):
 class GetChatIdTest(unittest.TestCase):
     @staticmethod
     def http_error(code):
+        # 본문 없이(None) 만들면 파이썬 3.9에서는 close()가 KeyError를 냅니다. 실제 응답처럼 본문을 줍니다.
         return urllib.error.HTTPError("https://api.telegram.org/botTOKEN/getUpdates",
-                                      code, "error", {}, None)
+                                      code, "error", {}, io.BytesIO(b""))
 
     def test_rejected_token_exits_with_a_hint_instead_of_a_traceback(self):
         for code in (401, 404):
