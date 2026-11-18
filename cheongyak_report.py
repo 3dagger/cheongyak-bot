@@ -61,6 +61,8 @@ FALLBACK_PHASE = ("접수", ("RCEPT_BGNDE", "SUBSCRPT_RCEPT_BGNDE"),
 UPCOMING_DAYS = 14
 MAX_PRICE_GROUPS = 4  # 평형이 이보다 많으면 줄이 길어져, 가장 작은 평형과 가장 큰 평형만 표시합니다.
 DETAIL_FAILURE_LIMIT = 3  # 공고별 상세 조회가 연달아 이만큼 실패하면 API 장애로 보고 남은 공고는 조회하지 않습니다.
+# 청약홈 API가 잠깐 APT를 0건으로 돌려줄 때가 있어(2026-11 확인), 0건이면 이 초만큼 기다렸다가 다시 받습니다.
+APT_RETRY_WAITS = (300, 300)
 
 LH_LIST_URL = "https://apis.data.go.kr/B552555/lhLeaseNoticeInfo1/lhLeaseNoticeInfo1"
 LH_CATEGORIES = ("05", "06", "13")  # 분양주택, 임대주택, 주거복지(신혼희망타운 등). 토지·상가는 제외합니다.
@@ -193,6 +195,18 @@ def fetch_notices(service_key, since):
             page += 1
     return [r for r in items if field(r, "RCRIT_PBLANC_DE") >= since.isoformat()
             and field(r, "HOUSE_DTL_SECD_NM") not in EXCLUDE_HOUSE_TYPES]
+
+
+def fetch_notices_retrying(service_key, since, waits=APT_RETRY_WAITS):
+    """APT 공고가 0건이면 API 일시 장애로 보고 waits대로 기다렸다가 다시 받습니다."""
+    items = fetch_notices(service_key, since)
+    for wait in waits:
+        if any(r["_type"] == "APT" for r in items):
+            break
+        print("청약홈 APT 공고가 0건이라 {}초 뒤 다시 조회합니다.".format(wait))
+        time.sleep(wait)
+        items = fetch_notices(service_key, since)
+    return items
 
 
 def lookup_each(rows, lookup):
@@ -851,7 +865,7 @@ def main():
     if unknown:
         warnings.append("AREA_FILTER에서 알 수 없는 지역: {} (예: 서울,경기,인천)".format(", ".join(unknown)))
 
-    items = fetch_notices(service_key, since)
+    items = fetch_notices_retrying(service_key, since, waits=() if args.dry_run else APT_RETRY_WAITS)
     if not any(r["_type"] == "APT" for r in items):
         warnings.append("청약홈 APT 공고가 0건입니다. API 응답을 확인해 주세요.")
     items += collect_optional("LH", lambda: fetch_lh(service_key, today), warnings)
