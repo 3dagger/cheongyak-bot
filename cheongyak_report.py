@@ -59,6 +59,7 @@ PHASES = [
 FALLBACK_PHASE = ("접수", ("RCEPT_BGNDE", "SUBSCRPT_RCEPT_BGNDE"),
                   ("RCEPT_ENDDE", "SUBSCRPT_RCEPT_ENDDE"))
 UPCOMING_DAYS = 14
+SQM_PER_PYEONG = 3.3058  # 흔히 말하는 "34평"은 공급면적(전용+주거공용)을 이 값으로 나눈 것입니다.
 MAX_PRICE_GROUPS = 4  # 평형이 이보다 많으면 줄이 길어져, 가장 작은 평형과 가장 큰 평형만 표시합니다.
 DETAIL_FAILURE_LIMIT = 3  # 공고별 상세 조회가 연달아 이만큼 실패하면 API 장애로 보고 남은 공고는 조회하지 않습니다.
 # 청약홈 API가 잠깐 APT를 0건으로 돌려줄 때가 있어(2026-11 확인), 0건이면 이 초만큼 기다렸다가 다시 받습니다.
@@ -164,6 +165,18 @@ def norm_date(val):
     return "{}-{}-{}".format(digits[:4], digits[4:6], digits[6:])
 
 
+def to_float(val):
+    try:
+        return float(str(val or "").replace(",", ""))
+    except ValueError:
+        return 0.0
+
+
+def to_pyeong(area):
+    """공급면적(㎡)을 반올림한 평으로 바꿉니다. 면적이 없으면 None입니다."""
+    return int(area / SQM_PER_PYEONG + 0.5) if area > 0 else None
+
+
 def to_int(val):
     digits = re.sub(r"\D", "", str(val or ""))
     return int(digits) if digits else 0
@@ -231,17 +244,19 @@ def lookup_each(rows, lookup):
 
 
 def top_prices(models):
-    """주택형별 조회 결과를 [(전용면적 ㎡, 최고 분양가 만원)]으로 묶습니다.
+    """주택형별 조회 결과를 [(전용면적 ㎡, 최고 분양가 만원, 평)]으로 묶습니다.
 
-    84A·84B처럼 면적이 같은 주택형은 가장 비싼 값 하나로 합칩니다. 분양가가 없는 응답(민간임대)은 빈 목록입니다.
+    84A·84B처럼 면적이 같은 주택형은 가장 비싼 주택형 하나로 합치고, 평도 그 주택형의 공급면적으로 셉니다.
+    공급면적이 없으면 평은 None입니다. 분양가가 없는 응답(민간임대)은 빈 목록입니다.
     """
-    prices = {}
+    best = {}
     for model in models:
         size = re.match(r"\d+", str(model.get("HOUSE_TY") or ""))
         amount = to_int(model.get("LTTOT_TOP_AMOUNT"))
         if size and amount:
-            prices[int(size.group())] = max(prices.get(int(size.group()), 0), amount)
-    return sorted(prices.items())
+            key = int(size.group())
+            best[key] = max(best.get(key, (0, 0.0)), (amount, to_float(model.get("SUPLY_AR"))))
+    return [(size, amount, to_pyeong(area)) for size, (amount, area) in sorted(best.items())]
 
 
 def attach_model_details(service_key, rows):
@@ -587,12 +602,18 @@ def format_price(amount):
     return "{}.{}억".format(whole, tenth) if tenth else "{}억".format(whole)
 
 
+def format_area(size, pyeong):
+    return "{}평({}㎡)".format(pyeong, size) if pyeong else "{}㎡".format(size)
+
+
 def format_prices(prices):
-    """[(전용면적, 최고 분양가)]를 '59㎡ 6.4억 · 84㎡ 8.6억'으로 씁니다. 평형이 많으면 양 끝만 씁니다."""
+    """[(전용면적, 최고 분양가, 평)]을 '25평(59㎡) 6.4억 · 34평(84㎡) 8.6억'으로 씁니다. 평형이 많으면 양 끝만 씁니다."""
     if len(prices) > MAX_PRICE_GROUPS:
-        (small, low), (large, high) = prices[0], prices[-1]
-        return "{}㎡ {} ~ {}㎡ {} (평형 {}개)".format(small, format_price(low), large, format_price(high), len(prices))
-    return " · ".join("{}㎡ {}".format(size, format_price(amount)) for size, amount in prices)
+        (small, low, small_py), (large, high, large_py) = prices[0], prices[-1]
+        return "{} {} ~ {} {} (평형 {}개)".format(format_area(small, small_py), format_price(low),
+                                                format_area(large, large_py), format_price(high), len(prices))
+    return " · ".join("{} {}".format(format_area(size, pyeong), format_price(amount))
+                      for size, amount, pyeong in prices)
 
 
 def house_type(row):
