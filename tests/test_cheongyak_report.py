@@ -647,6 +647,31 @@ class FetchNoticesTest(unittest.TestCase):
         self.assertEqual([(r["_id"], r["HOUSE_NM"]) for r in rows], [("오피스텔 등:2:2", "B 도시형")])
 
 
+class FetchNoticesRetryingTest(unittest.TestCase):
+    APT = {"_type": "APT"}
+    OTHER = {"_type": "임의공급"}
+
+    def run_with(self, responses, waits=(300, 300)):
+        with mock.patch.object(cr, "fetch_notices", side_effect=responses) as fetch, \
+                mock.patch("time.sleep") as sleep, contextlib.redirect_stdout(io.StringIO()):
+            rows = cr.fetch_notices_retrying("KEY", TODAY, waits=waits)
+        return rows, fetch.call_count, [call.args[0] for call in sleep.call_args_list]
+
+    def test_apt_on_first_try_is_not_refetched(self):
+        self.assertEqual(self.run_with([[self.APT]]), ([self.APT], 1, []))
+
+    def test_empty_apt_is_refetched_until_it_comes_back(self):
+        rows, calls, sleeps = self.run_with([[self.OTHER], [self.OTHER, self.APT]])
+        self.assertEqual((rows, calls, sleeps), ([self.OTHER, self.APT], 2, [300]))
+
+    def test_gives_up_after_the_last_wait_and_returns_what_it_has(self):
+        rows, calls, sleeps = self.run_with([[self.OTHER]] * 3)
+        self.assertEqual((rows, calls, sleeps), ([self.OTHER], 3, [300, 300]))
+
+    def test_no_waits_means_a_single_fetch(self):
+        self.assertEqual(self.run_with([[self.OTHER]], waits=()), ([self.OTHER], 1, []))
+
+
 class LookupEachTest(unittest.TestCase):
     @staticmethod
     def lookup_failing_on(bad, calls):
