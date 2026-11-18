@@ -104,7 +104,7 @@ def load_config():
             key, val = line.split("=", 1)
             cfg[key.strip()] = val.strip().strip('"').strip("'")
     for key in ("CHEONGYAK_SERVICE_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
-                "AREA_FILTER", "SEND_WHEN_EMPTY"):
+                "AREA_FILTER", "SEND_WHEN_EMPTY", "SKIP_IF_SENT_TODAY"):
         if os.environ.get(key):
             cfg[key] = os.environ[key]
     return cfg
@@ -502,6 +502,23 @@ def save_seen(seen, items, today):
     SEEN_PATH.write_text(json.dumps(merged, ensure_ascii=False, sort_keys=True), encoding="utf-8")
 
 
+def sent_path():
+    return SEEN_PATH.with_name("last_sent")
+
+
+def sent_today(today):
+    """오늘 리포트를 이미 보냈는지 봅니다. 외부 예약 호출과 GitHub 예약 실행이 둘 다 돌아도 한 번만 보내기 위한 기록입니다."""
+    try:
+        return sent_path().read_text(encoding="utf-8").strip() == today.isoformat()
+    except OSError:
+        return False
+
+
+def mark_sent(today):
+    sent_path().parent.mkdir(exist_ok=True)
+    sent_path().write_text(today.isoformat(), encoding="utf-8")
+
+
 def is_new(row, today, seen):
     """기록이 있으면 처음 보는 공고를, 없으면(첫 실행) 공고일이 어제·오늘인 공고를 새 공고로 봅니다."""
     posted = field(row, "RCRIT_PBLANC_DE")
@@ -858,6 +875,10 @@ def main():
         sys.exit(missing_config_message(missing))
 
     today = today_kst()
+    if (not args.dry_run and cfg.get("SKIP_IF_SENT_TODAY", "").lower() == "true"
+            and sent_today(today)):
+        print("{} 리포트는 이미 보냈습니다. 건너뜁니다 (SKIP_IF_SENT_TODAY=true)".format(today.isoformat()))
+        return
     since = today - timedelta(days=45)
     area_filter = parse_area_filter(cfg.get("AREA_FILTER", ""))
     warnings = []
@@ -901,6 +922,7 @@ def main():
         print("리포트 내용: " + (" · ".join("{} {}건".format(*count) for count in counts) or "소식 없음"))
     log_warnings(warnings)
     save_seen(seen, items, today)
+    mark_sent(today)
 
 
 def notify_failure(err):

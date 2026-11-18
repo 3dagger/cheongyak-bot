@@ -165,6 +165,22 @@ gh workflow run daily-report.yml -R <본인 계정>/cheongyak-bot
 
 GitHub 예약 실행은 제시간에 시작되지 않으니, 받고 싶은 시각보다 일찍 잡으세요. 이 레포는 지연이 2026년 7월에는 1시간 안쪽이었다가 11월에는 3~5시간까지 늘었고, 분을 정각에서 17분으로 옮겨도 줄지 않았습니다. 그래서 아침 7~8시에 받으려고 03:17(`17 18 * * *`)로 두었습니다. 실제로 언제 시작됐는지는 Actions 탭의 실행 기록에서 볼 수 있습니다. 한국 시간 자정보다 앞으로 잡으면, 지연이 짧은 날에는 전날 날짜로 리포트가 나갑니다.
 
+### 정해진 시각에 받기 (선택)
+
+예약 실행은 2026년 11월에 07:49~12:01 사이로 들쭉날쭉 시작됐습니다. 매일 같은 시각(예: 08:30)에 받으려면 외부 스케줄러가 그 시각에 워크플로를 API로 실행하게 합니다. 수동 실행(`workflow_dispatch`)은 몇 초 안에 시작됩니다.
+
+리포트는 하루에 한 번만 나갑니다. 외부 호출과 예약 실행 중 먼저 돈 쪽이 보내고, 나중 쪽은 `.state/last_sent` 기록을 보고 건너뜁니다. 예약 실행은 외부 호출이 빠진 날의 예비가 됩니다. Actions 탭에서 수동 실행할 때 "오늘 이미 보냈어도 다시 보내기"를 켜면 다시 보냅니다.
+
+1. GitHub → Settings → Developer settings → Fine-grained tokens에서 토큰을 만듭니다. Repository access는 이 레포 하나만, Permissions는 Actions: Read and write만 줍니다.
+2. [cron-job.org](https://cron-job.org) 같은 스케줄러에 작업을 하나 만듭니다.
+   - URL: `https://api.github.com/repos/<본인 계정>/cheongyak-bot/actions/workflows/daily-report.yml/dispatches`
+   - Method: `POST`, Body: `{"ref":"main"}`
+   - Headers: `Authorization: Bearer <토큰>`, `Accept: application/vnd.github+json`
+   - 시각: 매일 08:30, 시간대 `Asia/Seoul`
+3. 성공하면 GitHub가 `204`를 돌려주고 Actions 탭에 `workflow_dispatch` 실행이 생깁니다.
+
+토큰에는 만료일이 있으니 만료되기 전에 새로 만들어 바꿔 주세요. 토큰이 만료돼도 예약 실행이 예비로 돌기 때문에 리포트가 끊기지는 않고 늦게 올 뿐입니다.
+
 ## 동작 방식
 
 [cheongyak_report.py](cheongyak_report.py) 한 파일이 전부입니다.
@@ -176,7 +192,7 @@ GitHub 예약 실행은 제시간에 시작되지 않으니, 받고 싶은 시�
 
 몇 가지 덧붙이면 이렇습니다.
 
-- 보낸 공고 기록은 Actions 캐시로 다음 실행에 넘어갑니다. 캐시가 없는 첫 실행에는 공고일이 어제·오늘인 공고를 새 공고로 봅니다.
+- 보낸 공고 기록과 마지막으로 보낸 날짜(`.state/last_sent`)는 Actions 캐시로 다음 실행에 넘어갑니다. 캐시가 없는 첫 실행에는 공고일이 어제·오늘인 공고를 새 공고로 봅니다.
 - "오늘"은 실행하는 기기의 시간대와 상관없이 한국 날짜입니다. 서버가 UTC여도 그대로 돌리면 됩니다.
 - LH나 SH 조회가 실패하거나 결과가 0건이면 리포트는 그대로 보내고 맨 아래에 ⚠️ 경고를 붙입니다.
 - 같은 경고는 실행 로그에도 남습니다. Actions에서는 실행 페이지의 Annotations에 표시되고, 로그에는 섹션별로 몇 건을 보냈는지도 나옵니다.

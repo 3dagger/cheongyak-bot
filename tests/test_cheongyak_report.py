@@ -982,6 +982,30 @@ class MainTest(unittest.TestCase):
         self.assertEqual(self.posts[0][1]["text"], "🏠 <b>청약 데일리 리포트</b> — 2026-11-13 (금)\n\n"
                                                    "오늘은 새로운 공고·접수 소식이 없습니다.")
 
+    def test_second_run_of_the_day_is_skipped_only_when_asked(self):
+        self.run_main(SKIP_IF_SENT_TODAY="true")
+        calls = self.http_get.call_count
+
+        out = self.run_main(SKIP_IF_SENT_TODAY="true")
+        self.assertEqual(out, "2026-11-13 리포트는 이미 보냈습니다. 건너뜁니다 (SKIP_IF_SENT_TODAY=true)\n")
+        self.assertEqual((len(self.posts), self.http_get.call_count), (1, calls))
+
+        self.run_main()
+        self.assertEqual(len(self.posts), 2)
+
+    def test_skip_if_sent_today_ignores_yesterdays_record_and_dry_runs(self):
+        self.seen_path.parent.mkdir()
+        self.seen_path.with_name("last_sent").write_text("2026-11-12", encoding="utf-8")
+        self.run_main(SKIP_IF_SENT_TODAY="true")
+        self.assertEqual(len(self.posts), 1)
+        self.assertIn("🏠", self.run_main("--dry-run", SKIP_IF_SENT_TODAY="true"))
+
+    def test_quiet_day_without_sending_still_counts_as_handled(self):
+        self.run_main(AREA_FILTER="부산", SEND_WHEN_EMPTY="false", SKIP_IF_SENT_TODAY="true")
+        self.assertIn("이미 보냈습니다",
+                      self.run_main(AREA_FILTER="부산", SKIP_IF_SENT_TODAY="true"))
+        self.assertEqual(self.posts, [])
+
     def test_applyhome_failure_stops_the_run_without_sending_or_recording(self):
         self.down = {"applyhome"}
         with self.assertRaises(OSError):
