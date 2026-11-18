@@ -4,7 +4,13 @@ on:
   schedule:
     # 18:17 UTC = 다음날 03:17 KST. 예약 실행이 3~5시간 늦게 시작되므로(2026-11 기준), 아침 7~8시에 받도록 일찍 잡습니다
     - cron: "17 18 * * *"
+  # 정시 발송은 외부 스케줄러가 이 이벤트를 API로 부릅니다(README "정해진 시각에 받기"). 위 예약 실행은 그게 빠진 날의 예비입니다
   workflow_dispatch:
+    inputs:
+      force:
+        description: "오늘 이미 보냈어도 다시 보내기"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -25,6 +31,8 @@ jobs:
       # 레포 변수(Settings → Secrets and variables → Actions → Variables)로 바꿉니다. 없으면 서울,경기,인천
       AREA_FILTER: ${{ vars.AREA_FILTER || '서울,경기,인천' }}
       SEND_WHEN_EMPTY: ${{ vars.SEND_WHEN_EMPTY }}
+      # 외부 호출과 예약 실행이 둘 다 돌아도 하루 한 번만 보낸다. 수동 실행에서 force를 켜면 다시 보낸다
+      SKIP_IF_SENT_TODAY: ${{ !inputs.force }}
       CHEONGYAK_SERVICE_KEY: ${{ secrets.CHEONGYAK_SERVICE_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
