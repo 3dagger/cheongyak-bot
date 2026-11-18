@@ -427,18 +427,26 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(cr.format_price(9500), "9,500만")
 
     def test_format_prices_lists_each_area_or_just_both_ends_when_there_are_many(self):
-        self.assertEqual(cr.format_prices([(84, 182700)]), "84㎡ 18.3억")
-        self.assertEqual(cr.format_prices([(59, 63720), (74, 75423), (84, 86314), (99, 127200)]),
-                         "59㎡ 6.4억 · 74㎡ 7.5억 · 84㎡ 8.6억 · 99㎡ 12.7억")
-        self.assertEqual(cr.format_prices([(45, 65800), (59, 95600), (70, 110100), (84, 139100), (126, 202100)]),
-                         "45㎡ 6.6억 ~ 126㎡ 20.2억 (평형 5개)")
+        self.assertEqual(cr.format_prices([(84, 182700, 34)]), "34평(84㎡) 18.3억")
+        self.assertEqual(cr.format_prices([(59, 63720, 25), (74, 75423, 31), (84, 86314, 35), (99, 127200, None)]),
+                         "25평(59㎡) 6.4억 · 31평(74㎡) 7.5억 · 35평(84㎡) 8.6억 · 99㎡ 12.7억")
+        self.assertEqual(cr.format_prices([(45, 65800, 19), (59, 95600, 24), (70, 110100, 29), (84, 139100, 34),
+                                           (126, 202100, 49)]),
+                         "19평(45㎡) 6.6억 ~ 49평(126㎡) 20.2억 (평형 5개)")
+
+    def test_supply_area_becomes_rounded_pyeong(self):
+        self.assertEqual(cr.to_pyeong(115.3774), 35)
+        self.assertEqual(cr.to_pyeong(111.357), 34)
+        self.assertEqual(cr.to_pyeong(81.0969), 25)
+        self.assertIsNone(cr.to_pyeong(0.0))
+        self.assertEqual((cr.to_float("1,234.5"), cr.to_float(None), cr.to_float("-")), (1234.5, 0.0, 0.0))
 
     def test_format_line_puts_prices_between_the_schedule_and_the_family_quota(self):
         row = {"_type": "APT", "SUBSCRPT_AREA_CODE_NM": "서울", "HOUSE_NM": "X", "HOUSE_DTL_SECD_NM": "민영",
-               "_phases": [("특공", "2026-11-23", "2026-11-23")], "_prices": [(59, 98000), (84, 132000)],
+               "_phases": [("특공", "2026-11-23", "2026-11-23")], "_prices": [(59, 98000, 25), (84, 132000, 34)],
                "_special": {"신생아": 3}}
         self.assertEqual(cr.format_line(row), "• [서울] X (민영)\n   특공 11-23(월)\n"
-                                              "   💰 최고가 59㎡ 9.8억 · 84㎡ 13.2억\n   👶 신생아 3세대")
+                                              "   💰 최고가 25평(59㎡) 9.8억 · 34평(84㎡) 13.2억\n   👶 신생아 3세대")
         self.assertEqual(cr.format_line(dict(row, _prices=[])), "• [서울] X (민영)\n   특공 11-23(월)\n   👶 신생아 3세대")
 
     def test_format_repeat_keeps_only_the_relevant_phases_and_the_link(self):
@@ -710,14 +718,14 @@ class LookupEachTest(unittest.TestCase):
 
     def test_top_prices_are_attached_per_floor_area(self):
         rows = [{"_type": "APT", "HOUSE_MANAGE_NO": "1"}]
-        body = {"data": [{"HOUSE_TY": "084.9409A", "LTTOT_TOP_AMOUNT": "182700"},
-                         {"HOUSE_TY": "084.9708B", "LTTOT_TOP_AMOUNT": "178500"},
+        body = {"data": [{"HOUSE_TY": "084.9409A", "LTTOT_TOP_AMOUNT": "182700", "SUPLY_AR": "110.9884"},
+                         {"HOUSE_TY": "084.9708B", "LTTOT_TOP_AMOUNT": "178500", "SUPLY_AR": "115.3774"},
                          {"HOUSE_TY": "059.9800", "LTTOT_TOP_AMOUNT": 98000},
                          {"HOUSE_TY": "101.2000", "LTTOT_TOP_AMOUNT": ""},
                          {"HOUSE_TY": None, "LTTOT_TOP_AMOUNT": "50000"}]}
         with mock.patch.object(cr, "http_get_json", return_value=body):
             cr.attach_model_details("key", rows)
-        self.assertEqual(rows[0]["_prices"], [(59, 98000), (84, 182700)])
+        self.assertEqual(rows[0]["_prices"], [(59, 98000, None), (84, 182700, 34)])
 
 
 class TelegramErrorTest(unittest.TestCase):
@@ -830,7 +838,7 @@ SH_LINE = ("• [서울] 고덕강일 입주자 모집 공고 (SH 분양)\n"
            '?multi_itm_seq=1&amp;seq=301">공고</a>')
 APT_LINE = ("• [서울] 테스트자이 (민영 1,024세대 · 분상제)\n"
             '   특공 11-20(금) · 1순위 11-23(월) · 발표 12-02(수) · <a href="https://www.applyhome.co.kr/x">공고</a>\n'
-            "   💰 최고가 59㎡ 9.8억 · 84㎡ 13.2억\n"
+            "   💰 최고가 25평(59㎡) 9.8억 · 34평(84㎡) 13.2억\n"
             "   👶 신생아 3세대 · 신혼 5세대")
 # 오늘·내일 섹션에 처음 나올 때는 그 섹션에 해당하는 접수 단계가 굵게 나옵니다.
 LH_DUE_LINE = LH_LINE.replace("일반 11-13(금)~11-14(토)", "<b>일반 11-13(금)~11-14(토)</b>")
@@ -900,8 +908,8 @@ class MainTest(unittest.TestCase):
                 return json.dumps({"data": [self.APT]})
             if endpoint == "getAPTLttotPblancMdl":
                 return json.dumps({"data": [
-                    {"HOUSE_TY": "059.9800A", "LTTOT_TOP_AMOUNT": "98000", "NWBB_HSHLDCO": 1, "NWWDS_HSHLDCO": 2},
-                    {"HOUSE_TY": "084.9409A", "LTTOT_TOP_AMOUNT": "132000", "NWBB_HSHLDCO": 2, "NWWDS_HSHLDCO": 3},
+                    {"HOUSE_TY": "059.9800A", "LTTOT_TOP_AMOUNT": "98000", "SUPLY_AR": "81.0969", "NWBB_HSHLDCO": 1, "NWWDS_HSHLDCO": 2},
+                    {"HOUSE_TY": "084.9409A", "LTTOT_TOP_AMOUNT": "132000", "SUPLY_AR": "111.3570", "NWBB_HSHLDCO": 2, "NWWDS_HSHLDCO": 3},
                     {"HOUSE_TY": "084.9708B", "LTTOT_TOP_AMOUNT": "128500", "NWBB_HSHLDCO": 0, "NWWDS_HSHLDCO": 0},
                 ]})
             return json.dumps({"data": []})
