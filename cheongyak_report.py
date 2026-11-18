@@ -82,6 +82,17 @@ SH_ROW_RE = re.compile(r"getDetailView\('(\d+)'\).*?>(.*?)</a>.*?(\d{4}-\d{2}-\d
 ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 KST = timezone(timedelta(hours=9))
 WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
+# 폰 화면에서 줄이 넘어가면 들여쓰기가 풀려 공고 경계가 안 보이므로, 공고명은 이 글자 수에서 자릅니다.
+TITLE_MAX = 40
+SUMMARY_LABELS = {"새 공고": "🆕 새 공고", "특공 예정": "👶 특공", "오늘 접수": "📬 오늘", "내일 마감": "⏰ 마감"}
+SECTION_RULE = "━━━━━━━━━━━━"
+# 공고명에서 지우는 군더더기입니다: [정정공고]·[선계약/후검증] 같은 대괄호, ('26.11.18.) 같은 날짜 괄호,
+# 끝에 붙는 "입주자 모집 공고"·"공고(무순위, …)".
+TITLE_NOISE_RES = (
+    re.compile(r"\[[^\]]*\]"),
+    re.compile(r"\(\s*'?\d{2,4}[.\-/]\s*\d{1,2}[.\-/]\s*\d{1,2}\.?\s*\)"),
+)
+TITLE_TAIL_RE = re.compile(r"\s*(?:입주자\s*)?(?:모집\s*)?(?:공고\s*(?:\([^)]*\))?|모집)\s*$")
 REGION_NAMES = (
     ("서울", ("서울",)), ("부산", ("부산",)), ("대구", ("대구",)), ("인천", ("인천",)),
     ("광주", ("광주",)), ("대전", ("대전",)), ("울산", ("울산",)), ("세종", ("세종",)),
@@ -590,7 +601,7 @@ def has_family_quota(row):
 
 
 def format_family(label, count):
-    return "{} 특공".format(label) if count is None else "{} {:,}세대".format(label, count)
+    return "{} 특공".format(label) if count is None else "{} {:,}".format(label, count)
 
 
 def format_price(amount):
@@ -603,11 +614,12 @@ def format_price(amount):
 
 
 def format_area(size, pyeong):
-    return "{}평({}㎡)".format(pyeong, size) if pyeong else "{}㎡".format(size)
+    """평을 알면 '34평', 모르면 전용면적 '84㎡'로 씁니다."""
+    return "{}평".format(pyeong) if pyeong else "{}㎡".format(size)
 
 
 def format_prices(prices):
-    """[(전용면적, 최고 분양가, 평)]을 '25평(59㎡) 6.4억 · 34평(84㎡) 8.6억'으로 씁니다. 평형이 많으면 양 끝만 씁니다."""
+    """[(전용면적, 최고 분양가, 평)]을 '25평 6.4억 · 34평 8.6억'으로 씁니다. 평형이 많으면 양 끝만 씁니다."""
     if len(prices) > MAX_PRICE_GROUPS:
         (small, low, small_py), (large, high, large_py) = prices[0], prices[-1]
         return "{} {} ~ {} {} (평형 {}개)".format(format_area(small, small_py), format_price(low),
@@ -623,66 +635,89 @@ def house_type(row):
     return field(row, "HOUSE_DTL_SECD_NM", "HOUSE_DETAIL_SECD_NM") or row["_type"]
 
 
-def short_date(day):
-    """YYYY-MM-DD를 '11-16(월)'처럼 월-일과 요일로 줄입니다. 날짜로 읽히지 않으면 연도만 뗍니다."""
+def short_date(day, weekday=True):
+    """YYYY-MM-DD를 '11/16(월)'처럼 월/일과 요일로 줄입니다. 날짜로 읽히지 않으면 연도만 뗍니다."""
     try:
-        weekday = datetime.strptime(day, "%Y-%m-%d").weekday()
+        parsed = datetime.strptime(day, "%Y-%m-%d")
     except ValueError:
         return day[5:]
-    return "{}({})".format(day[5:], WEEKDAY_KO[weekday])
+    text = "{}/{}".format(parsed.month, parsed.day)
+    return "{}({})".format(text, WEEKDAY_KO[parsed.weekday()]) if weekday else text
 
 
-def format_phase(label, begin, end):
+def format_phase(label, begin, end, weekday=True):
     if not begin:
-        return "{} {}".format(label, short_date(end))
+        return "{} {}".format(label, short_date(end, weekday))
     if not end or begin == end:
-        return "{} {}".format(label, short_date(begin))
-    return "{} {}~{}".format(label, short_date(begin), short_date(end))
+        return "{} {}".format(label, short_date(begin, weekday))
+    return "{} {}~{}".format(label, short_date(begin, weekday), short_date(end, weekday))
 
 
-def notice_title(row):
-    return "[{}] {}".format(html.escape(area_label(row)), html.escape(field(row, "HOUSE_NM") or "이름미상"))
+def clean_title(name):
+    """공고명에서 군더더기를 지우고 TITLE_MAX자에서 자릅니다. 다 지우면 원래 이름을 씁니다."""
+    text = name
+    for pattern in TITLE_NOISE_RES:
+        text = pattern.sub(" ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    while True:
+        trimmed = TITLE_TAIL_RE.sub("", text)
+        if trimmed == text or not trimmed:
+            break
+        text = trimmed
+    text = text or name.strip()
+    return text if len(text) <= TITLE_MAX else text[:TITLE_MAX - 1].rstrip() + "…"
 
 
-def notice_link(row):
+def notice_name(row):
+    """굵은 공고명입니다. 원문 주소가 있으면 공고명을 누르면 원문이 열립니다."""
+    name = html.escape(clean_title(field(row, "HOUSE_NM") or "이름미상"))
     url = field(row, "PBLANC_URL")
-    return ['<a href="{}">공고</a>'.format(html.escape(url, quote=True))] if url else []
+    if url:
+        name = '<a href="{}">{}</a>'.format(html.escape(url, quote=True), name)
+    return "<b>{}</b>".format(name)
 
 
 def format_line(row, highlight=None):
-    """공고 한 건을 텔레그램 HTML로 만듭니다. highlight(시작일, 종료일)가 참인 접수 단계는 굵게 표시합니다.
+    """공고 한 건을 텔레그램 HTML 블록으로 만듭니다. highlight(시작일, 종료일)가 참인 접수 단계는 굵게 표시합니다.
 
+    폰에서 줄이 넘어가지 않도록 공고명 · 지역과 유형 · 📅 일정 · 💰 분양가 · 👶 특공을 줄마다 나눕니다.
+    일정이 여러 단계면 요일을 빼고 화살표로 잇습니다.
     API에서 온 글자는 모두 이스케이프합니다. 지역·주택 유형·접수 단계명에 <나 &가 섞여 오면
     텔레그램이 메시지를 통째로 거절해 그날 리포트가 가지 않기 때문입니다.
     """
-    households = to_int(row.get("TOT_SUPLY_HSHLDCO"))
-    hh = " {:,}세대".format(households) if households else ""
-    details = []
-    for label, begin, end in phases(row):
-        text = html.escape(format_phase(label, begin, end))
-        details.append("<b>{}</b>".format(text) if highlight and highlight(begin, end) else text)
+    schedule = list(phases(row))
     announced = field(row, "PRZWNER_PRESNATN_DE")
     if ISO_DATE_RE.fullmatch(announced):  # 당첨자 발표일이 같은 단지는 중복 청약이 제한되어, 함께 보이게 합니다.
-        details.append("발표 " + short_date(announced))
-    details += notice_link(row)
-    capped = " · 분상제" if field(row, "PARCPRC_ULS_AT") == "Y" else ""  # 분양가상한제 적용 단지입니다.
-    line = "• {} ({}{}{})".format(notice_title(row), html.escape(house_type(row)), hh, capped)
-    if details:
-        line += "\n   " + " · ".join(details)
+        schedule.append(("발표", announced, announced))
+    weekday = len(schedule) == 1
+    steps = []
+    for label, begin, end in schedule:
+        text = html.escape(format_phase(label, begin, end, weekday))
+        steps.append("<b>{}</b>".format(text) if highlight and highlight(begin, end) else text)
+
+    households = to_int(row.get("TOT_SUPLY_HSHLDCO"))
+    kind = html.escape(house_type(row)) + (" {:,}세대".format(households) if households else "")
+    about = [html.escape(area_label(row)), kind]
+    if field(row, "PARCPRC_ULS_AT") == "Y":  # 분양가상한제 적용 단지입니다.
+        about.append("분상제")
+
+    lines = ["▪️ " + notice_name(row), "   " + " · ".join(about)]
+    if steps:
+        lines.append("   📅 " + (" → ".join(steps) if len(steps) > 1 else steps[0]))
     if row.get("_prices"):
-        line += "\n   💰 최고가 " + format_prices(row["_prices"])
+        lines.append("   💰 " + format_prices(row["_prices"]))
     if has_family_quota(row):
-        line += "\n   👶 " + " · ".join(format_family(label, count)
-                                       for label, count in row["_special"].items()
-                                       if count is None or count > 0)
-    return line
+        lines.append("   👶 " + " · ".join(format_family(label, count)
+                                         for label, count in row["_special"].items()
+                                         if count is None or count > 0))
+    return "\n".join(lines)
 
 
 def format_repeat(row, relevant):
-    """앞 섹션에 이미 나온 공고를 한 줄로 줄입니다. relevant(시작일, 종료일)가 참인 접수 단계와 링크만 남깁니다."""
+    """앞 섹션에 이미 나온 공고를 한 줄로 줄입니다. relevant(시작일, 종료일)가 참인 접수 단계만 남깁니다."""
     details = [html.escape(format_phase(label, begin, end))
                for label, begin, end in phases(row) if relevant(begin, end)]
-    return "• {} — {}".format(notice_title(row), " · ".join(details + notice_link(row)))
+    return "▪️ {} — {}".format(notice_name(row), " · ".join(details))
 
 
 def build_report(items, today, warnings=(), seen=None):
@@ -709,8 +744,7 @@ def build_report(items, today, warnings=(), seen=None):
     new_notices = [r for r in items if is_new(r, today, seen)]
     family = having(starts_soon, [r for r in items if has_family_quota(r)])
 
-    header = "🏠 <b>청약 데일리 리포트</b> — {} ({})".format(
-        today_s, WEEKDAY_KO[today.weekday()])
+    header = "🏠 <b>청약 데일리 리포트</b> · {}".format(short_date(today_s))
     sections, counts, shown = [], [], set()
 
     def add_section(label, title, rows, relevant=None, bold=False):
@@ -727,7 +761,7 @@ def build_report(items, today, warnings=(), seen=None):
             else:
                 lines.append(format_line(row, relevant if bold else None))
                 shown.add(row["_id"])
-        sections.append("<b>{}</b>\n{}".format(title, "\n".join(lines)))
+        sections.append("<b>{}</b>\n\n{}".format(title, "\n\n".join(lines)))
         counts.append((label, len(rows)))
 
     add_section("새 공고", "🆕 새로 올라온 공고 ({})".format(
@@ -742,7 +776,10 @@ def build_report(items, today, warnings=(), seen=None):
     footer = "\n" + footer if footer else ""
     if not sections:
         return header + "\n\n오늘은 새로운 공고·접수 소식이 없습니다." + footer, counts
-    return header + "\n\n" + "\n\n".join(sections) + footer, counts
+    # 알림 미리보기에서 오늘 볼 게 있는지 바로 알 수 있도록 섹션별 건수를 제목 아래에 씁니다.
+    summary = " · ".join("{} {}".format(SUMMARY_LABELS[label], count) for label, count in counts)
+    rule = "\n\n{}\n".format(SECTION_RULE)
+    return header + "\n" + summary + rule + rule.join(sections) + footer, counts
 
 
 def log_warnings(warnings):
@@ -762,14 +799,18 @@ def log_warnings(warnings):
 
 
 def notice_blocks(text):
-    """메시지를 끊어도 되는 단위로 묶습니다. 들여쓴 줄은 앞의 • 줄에, 섹션 제목은 바로 다음 공고에 붙입니다."""
+    """메시지를 끊어도 되는 단위로 묶습니다.
+
+    공고 한 건(▪️ 줄과 그 아래 줄)이 한 단위이고, 구분선·섹션 제목은 바로 다음 공고에 붙여
+    메시지 끝에 혼자 남지 않게 합니다. 빈 줄과 경고는 앞 단위에 붙습니다.
+    """
     blocks = []
     for line in text.split("\n"):
-        lone_title = bool(blocks) and blocks[-1].startswith("<b>") and "\n" not in blocks[-1]
-        if blocks and (line.startswith(" ") or lone_title):
-            blocks[-1] += "\n" + line
-        else:
+        has_notice = bool(blocks) and (blocks[-1].startswith("▪️") or "\n▪️" in blocks[-1])
+        if not blocks or line.startswith(SECTION_RULE) or (line.startswith("▪️") and has_notice):
             blocks.append(line)
+        else:
+            blocks[-1] += "\n" + line
     return blocks
 
 
