@@ -77,6 +77,8 @@ LH_HOUSE_NO_RE = re.compile(r"주택관리번호[^0-9]{0,10}(\d{10})")
 SH_BOARD_URL = "https://www.i-sh.co.kr/app/lay2/program/S1T294C297/www/brd/m_247/{}.do"
 SH_BOARDS = (("1", "SH 분양"), ("2", "SH 임대"))
 SH_EXCLUDE = ("당첨", "결과", "명단", "발표", "동호", "서류")
+# 제목 앞의 NEW 배지(<span class="icoNew">NEW</span>)는 제목이 아니라서 지웁니다.
+SH_BADGE_RE = re.compile(r"<span[^>]*class=\"[^\"]*icoNew[^\"]*\"[^>]*>.*?</span>", re.S)
 SH_ROW_RE = re.compile(r"getDetailView\('(\d+)'\).*?>(.*?)</a>.*?(\d{4}-\d{2}-\d{2})", re.S)
 
 ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -483,7 +485,7 @@ def parse_sh_board(page, board, label):
     rows = []
     for match in matches:
         seq, raw_title, posted = match.groups()
-        title = " ".join(html.unescape(re.sub(r"<[^>]+>", "", raw_title)).split())
+        title = " ".join(html.unescape(re.sub(r"<[^>]+>", "", SH_BADGE_RE.sub("", raw_title))).split())
         if not ("입주" in title and "모집" in title) or any(w in title for w in SH_EXCLUDE):
             continue
         rows.append({

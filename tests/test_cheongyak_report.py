@@ -266,13 +266,15 @@ class ParseShBoardTest(unittest.TestCase):
             self.tr("302", "고덕강일 3단지 입주자 모집 당첨자 발표", "2026-11-04"),
             self.tr("303", "임대료 납부 안내", "2026-11-05"),
             self.tr("304", "&lt;재공고&gt; 행복주택 입주자 모집", "2026-11-06"),
+            self.tr("305", '\r\n\t<span class="icoNew">NEW</span>\r\n\t신림4호점 입주자 모집 공고\r\n', "2026-11-20"),
         ]))
 
         rows = cr.parse_sh_board(page, "1", "SH 분양")
 
-        self.assertEqual([r["_id"] for r in rows], ["SH:1:301", "SH:1:304"])
+        self.assertEqual([r["_id"] for r in rows], ["SH:1:301", "SH:1:304", "SH:1:305"])
         self.assertEqual(rows[0]["HOUSE_NM"], "고덕강일 3단지 입주자 모집 공고")
         self.assertEqual(rows[1]["HOUSE_NM"], "<재공고> 행복주택 입주자 모집")
+        self.assertEqual(rows[2]["HOUSE_NM"], "신림4호점 입주자 모집 공고")
         self.assertEqual(rows[0]["RCRIT_PBLANC_DE"], "2026-11-03")
         self.assertEqual(rows[0]["SUBSCRPT_AREA_CODE_NM"], "서울")
         query = urllib.parse.parse_qs(urllib.parse.urlparse(rows[0]["PBLANC_URL"]).query)
