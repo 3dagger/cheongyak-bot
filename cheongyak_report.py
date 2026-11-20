@@ -692,8 +692,16 @@ def notice_name(row):
     return "<b>{}</b>".format(name)
 
 
-def format_line(row, highlight=None):
+def days_left(day, today):
+    """접수일까지 남은 날을 'D-3'처럼 씁니다. 오늘이면 'D-day'입니다."""
+    left = (datetime.strptime(day, "%Y-%m-%d").date() - today).days
+    return "D-day" if left == 0 else "D-{}".format(left)
+
+
+def format_line(row, highlight=None, mark=None):
     """공고 한 건을 텔레그램 HTML 블록으로 만듭니다. highlight(시작일, 종료일)가 참인 접수 단계는 굵게 표시합니다.
+
+    mark(시작일, 종료일)가 돌려주는 글자(예: ' D-3')는 그 접수 단계 뒤에 붙입니다.
 
     폰에서 줄이 넘어가지 않도록 공고명 · 지역과 유형 · 📅 일정 · 💰 분양가 · 👶 특공을 줄마다 나눕니다.
     일정이 여러 단계면 요일을 빼고 화살표로 잇습니다.
@@ -707,7 +715,7 @@ def format_line(row, highlight=None):
     weekday = len(schedule) == 1
     steps = []
     for label, begin, end in schedule:
-        text = html.escape(format_phase(label, begin, end, weekday))
+        text = html.escape(format_phase(label, begin, end, weekday)) + (mark(begin, end) if mark else "")
         steps.append("<b>{}</b>".format(text) if highlight and highlight(begin, end) else text)
 
     households = to_int(row.get("TOT_SUPLY_HSHLDCO"))
@@ -728,9 +736,9 @@ def format_line(row, highlight=None):
     return "\n".join(lines)
 
 
-def format_repeat(row, relevant):
+def format_repeat(row, relevant, mark=None):
     """앞 섹션에 이미 나온 공고를 한 줄로 줄입니다. relevant(시작일, 종료일)가 참인 접수 단계만 남깁니다."""
-    details = [html.escape(format_phase(label, begin, end))
+    details = [html.escape(format_phase(label, begin, end)) + (mark(begin, end) if mark else "")
                for label, begin, end in phases(row) if relevant(begin, end)]
     return "▪️ {} — {}".format(notice_name(row), " · ".join(details))
 
@@ -777,26 +785,39 @@ def build_report(items, today, warnings=(), seen=None):
     header = "🏠 <b>청약 데일리 리포트</b> · {}".format(short_date(today_s))
     sections, counts, shown = [], [], set()
 
-    def add_section(label, title, rows, relevant=None, bold=False):
+    def add_section(label, title, rows, relevant=None, bold=False, soonest=False):
         """relevant(시작일, 종료일)는 이 섹션에 올라온 이유가 되는 접수 단계를 고릅니다.
 
         앞 섹션에 나온 공고는 그 단계만 한 줄로 쓰고, bold면 처음 나오는 공고에서도 그 단계를 굵게 표시합니다.
+        soonest면 그 단계가 가장 이른 공고부터 쓰고, 가장 이른 단계 뒤에 남은 날(D-3)을 붙입니다.
         """
         if not rows:
             return
+
+        def first(row):
+            return min(begin for _, begin, end in phases(row) if relevant(begin, end))
+
+        order = (lambda r: (first(r),) + sort_key(r)) if soonest else sort_key
         lines = []
-        for row in sorted(rows, key=sort_key):
+        for row in sorted(rows, key=order):
+            mark = None
+            if soonest:
+                start = first(row)
+
+                def mark(begin, end, start=start):
+                    return " " + days_left(begin, today) if begin == start and relevant(begin, end) else ""
             if relevant and row["_id"] in shown:
-                lines.append(format_repeat(row, relevant))
+                lines.append(format_repeat(row, relevant, mark))
             else:
-                lines.append(format_line(row, relevant if bold else None))
+                lines.append(format_line(row, relevant if bold else None, mark))
                 shown.add(row["_id"])
         sections.append("<b>{}</b>\n\n{}".format(title, "\n\n".join(lines)))
         counts.append((label, len(rows)))
 
     add_section("새 공고", "🆕 새로 올라온 공고 ({})".format(
         "어제~오늘" if seen is None else "지난 리포트 이후"), new_notices)
-    add_section("특공 예정", "👶 신생아·신혼 특공 접수 예정 ({}일 내)".format(UPCOMING_DAYS), family, starts_soon)
+    add_section("특공 예정", "👶 신생아·신혼 특공 접수 예정 ({}일 내)".format(UPCOMING_DAYS), family, starts_soon,
+                soonest=True)
     # 접수는 대부분 하루뿐이라 시작과 마감을 따로 두면 같은 단지가 두 번 나옵니다. 날짜별로 묶고,
     # 그 섹션에 올라온 이유가 된 접수 단계를 굵게 표시합니다.
     add_section("오늘 접수", "📬 오늘 접수 (시작·마감)", having(due_today), due_today, bold=True)
