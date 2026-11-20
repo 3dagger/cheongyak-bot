@@ -59,6 +59,8 @@ PHASES = [
 FALLBACK_PHASE = ("접수", ("RCEPT_BGNDE", "SUBSCRPT_RCEPT_BGNDE"),
                   ("RCEPT_ENDDE", "SUBSCRPT_RCEPT_ENDDE"))
 UPCOMING_DAYS = 14
+# 섹션 안에서 유형별로 묶는 순서입니다. APT 분양 → 무순위·임의공급(줍줍) → 나머지(LH·SH·민간임대 등).
+KIND_ORDER = {"APT": 0, "무순위·잔여": 1, "임의공급": 1}
 SQM_PER_PYEONG = 3.3058  # 흔히 말하는 "34평"은 공급면적(전용+주거공용)을 이 값으로 나눈 것입니다.
 MAX_PRICE_GROUPS = 4  # 평형이 이보다 많으면 줄이 길어져, 가장 작은 평형과 가장 큰 평형만 표시합니다.
 DETAIL_FAILURE_LIMIT = 3  # 공고별 상세 조회가 연달아 이만큼 실패하면 API 장애로 보고 남은 공고는 조회하지 않습니다.
@@ -596,7 +598,9 @@ def phases(row):
 
 
 def sort_key(row):
-    return field(row, "SUBSCRPT_AREA_CODE_NM"), min((b or e for _, b, e in phases(row)), default="")
+    """섹션 안 순서입니다. 유형(KIND_ORDER) → 지역 → 첫 접수일 순으로, 청약통장으로 넣는 APT가 먼저 나옵니다."""
+    return (KIND_ORDER.get(row.get("_type"), len(set(KIND_ORDER.values()))),
+            field(row, "SUBSCRPT_AREA_CODE_NM"), min((b or e for _, b, e in phases(row)), default=""))
 
 
 def last_date(row):

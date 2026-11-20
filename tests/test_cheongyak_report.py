@@ -335,8 +335,17 @@ class PhasesTest(unittest.TestCase):
         row = {"SUBSCRPT_AREA_CODE_NM": "서울",
                "_phases": [("특공", "2026-11-10", "2026-11-10"), ("마감", "", "2026-11-20")]}
         self.assertEqual(cr.last_date(row), "2026-11-20")
-        self.assertEqual(cr.sort_key(row), ("서울", "2026-11-10"))
+        self.assertEqual(cr.sort_key(row), (2, "서울", "2026-11-10"))
         self.assertEqual(cr.last_date({"_phases": []}), "")
+
+    def test_sort_puts_apt_first_then_leftover_units_then_the_rest(self):
+        def row(kind, area):
+            return {"_type": kind, "SUBSCRPT_AREA_CODE_NM": area, "_phases": [("접수", "2026-11-20", "2026-11-20")]}
+        rows = [row("SH", "서울"), row("임의공급", "경기"), row("LH", "경기"), row("APT", "서울"),
+                row("무순위·잔여", "인천"), row("APT", "경기"), row("공공지원 민간임대", "서울")]
+        self.assertEqual([(r["_type"], r["SUBSCRPT_AREA_CODE_NM"]) for r in sorted(rows, key=cr.sort_key)], [
+            ("APT", "경기"), ("APT", "서울"), ("임의공급", "경기"), ("무순위·잔여", "인천"),
+            ("LH", "경기"), ("SH", "서울"), ("공공지원 민간임대", "서울")])
 
 
 class FormatTest(unittest.TestCase):
@@ -889,7 +898,7 @@ APT_REPEAT = APT_NAME + " — 특공 11/20(금) · 1순위 11/23(월)"
 RULE = "\n\n" + cr.SECTION_RULE + "\n"
 FIRST_REPORT = ("🏠 <b>청약 데일리 리포트</b> · 11/13(금)\n"
                 "🆕 새 공고 3 · 👶 특공 1 · 📬 오늘 1 · ⏰ 마감 1" + RULE + RULE.join([
-                    "<b>🆕 새로 올라온 공고 (어제~오늘)</b>\n\n" + "\n\n".join([LH_LINE, SH_LINE, APT_LINE]),
+                    "<b>🆕 새로 올라온 공고 (어제~오늘)</b>\n\n" + "\n\n".join([APT_LINE, LH_LINE, SH_LINE]),
                     "<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n\n" + APT_REPEAT,
                     "<b>📬 오늘 접수 (시작·마감)</b>\n\n" + LH_REPEAT,
                     "<b>⏰ 내일 마감</b>\n\n" + LH_REPEAT,
