@@ -550,7 +550,7 @@ class BuildReportTest(unittest.TestCase):
             "<b>⏰ 내일 마감</b>",
         ])
         self.assertEqual(sections[0][1:], ["▪️ <b>new</b>\n   서울 · APT\n   📅 특공 11/20(금)\n   👶 신혼 10"])
-        self.assertEqual(sections[1][1:], ["▪️ <b>new</b> — 특공 11/20(금)"])
+        self.assertEqual(sections[1][1:], ["▪️ <b>new</b> — 특공 11/20(금) D-7"])
         # 오늘 시작하는 접수와 오늘 끝나는 접수가 한 섹션에 나오고, 내일 끝나는 접수는 따로 나옵니다.
         self.assertEqual(sections[2][1:], [
             "▪️ <b>opening</b>\n   경기 · APT\n   📅 <b>1순위 11/13(금)~11/14(토)</b>",
@@ -582,12 +582,29 @@ class BuildReportTest(unittest.TestCase):
             "<b>🆕 새로 올라온 공고 (지난 리포트 이후)</b>\n\n" + name + "\n   서울 · APT\n"
             "   📅 특공 11/13 → 1순위 11/14 → 일반 11/16~11/17\n   👶 신혼 10",
             "<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n\n"
-            + name + " — 특공 11/13(금) · 1순위 11/14(토) · 일반 11/16(월)~11/17(화)",
+            + name + " — 특공 11/13(금) D-day · 1순위 11/14(토) · 일반 11/16(월)~11/17(화)",
             "<b>📬 오늘 접수 (시작·마감)</b>\n\n" + name + " — 특공 11/13(금)",
             "<b>⏰ 내일 마감</b>\n\n" + name + " — 1순위 11/14(토)",
         ])
         # 한 줄로 줄여도 섹션별 건수에는 그대로 셉니다.
         self.assertEqual(counts, [("새 공고", 1), ("특공 예정", 1), ("오늘 접수", 1), ("내일 마감", 1)])
+
+    def test_family_section_lists_the_soonest_application_first_with_days_left(self):
+        def family(row_id, area, begin):
+            return self.row(row_id, area, [("특공", begin, begin), ("1순위", "2026-11-26", "2026-11-26")],
+                            _special={"신혼": 1})
+        rows = [family("경기 늦음", "경기", "2026-11-25"), family("서울 이름", "서울", "2026-11-16"),
+                family("인천 오늘", "인천", "2026-11-13")]
+        report, _ = cr.build_report(rows, TODAY, seen={r["_id"]: "2026-11-01" for r in rows})
+        self.assertEqual([block.split("\n")[:3] for block in self.sections(report)[0].split("\n\n")[1:]], [
+            ["▪️ <b>인천 오늘</b>", "   인천 · APT", "   📅 특공 11/13 D-day → 1순위 11/26"],
+            ["▪️ <b>서울 이름</b>", "   서울 · APT", "   📅 특공 11/16 D-3 → 1순위 11/26"],
+            ["▪️ <b>경기 늦음</b>", "   경기 · APT", "   📅 특공 11/25 D-12 → 1순위 11/26"],
+        ])
+
+    def test_days_left(self):
+        self.assertEqual(cr.days_left("2026-11-13", TODAY), "D-day")
+        self.assertEqual(cr.days_left("2026-11-16", TODAY), "D-3")
 
     def test_open_apt_notices_with_the_same_announcement_date_are_flagged_at_the_end(self):
         def apt(row_id, area, begin, announced, **extra):
@@ -918,7 +935,9 @@ APT_LINE = (APT_NAME + "\n   서울 · 민영 1,024세대 · 분상제\n"
 LH_DUE_LINE = LH_LINE.replace("일반 11/13(금)~11/14(토)", "<b>일반 11/13(금)~11/14(토)</b>")
 # 앞 섹션에 이미 나온 공고는 한 줄로 줄어듭니다.
 LH_REPEAT = LH_NAME + " — 일반 11/13(금)~11/14(토)"
-APT_REPEAT = APT_NAME + " — 특공 11/20(금) · 1순위 11/23(월)"
+# 특공 예정 섹션에서는 가장 이른 접수 단계 뒤에 남은 날이 붙습니다.
+APT_REPEAT = APT_NAME + " — 특공 11/20(금) D-7 · 1순위 11/23(월)"
+APT_FAMILY_LINE = APT_LINE.replace("특공 11/20 →", "특공 11/20 D-7 →")
 RULE = "\n\n" + cr.SECTION_RULE + "\n"
 FIRST_REPORT = ("🏠 <b>청약 데일리 리포트</b> · 11/13(금)\n"
                 "🆕 새 공고 3 · 👶 특공 1 · 📬 오늘 1 · ⏰ 마감 1" + RULE + RULE.join([
@@ -1037,7 +1056,7 @@ class MainTest(unittest.TestCase):
 
         text = self.posts[1][1]["text"]
         self.assertNotIn("🆕", text)
-        self.assertIn("<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n\n" + APT_LINE, text)
+        self.assertIn("<b>👶 신생아·신혼 특공 접수 예정 (14일 내)</b>\n\n" + APT_FAMILY_LINE, text)
         self.assertIn("<b>📬 오늘 접수 (시작·마감)</b>\n\n" + LH_DUE_LINE, text)
         self.assertTrue(text.endswith("<b>⏰ 내일 마감</b>\n\n" + LH_REPEAT))
         self.assertIn("리포트 내용: 특공 예정 1건 · 오늘 접수 1건 · 내일 마감 1건\n", out)
