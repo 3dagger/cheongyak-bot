@@ -94,7 +94,13 @@ TITLE_NOISE_RES = (
     re.compile(r"\[[^\]]*\]"),
     re.compile(r"\(\s*'?\d{2,4}[.\-/]\s*\d{1,2}[.\-/]\s*\d{1,2}\.?\s*\)"),
 )
-TITLE_TAIL_RE = re.compile(r"\s*(?:입주자\s*)?(?:모집\s*)?(?:공고\s*(?:\([^)]*\))?|모집)\s*$")
+# (부천대장지구 A2BL)은 같은 이름의 다른 블록과 구분하는 번호만 남겨 " A2BL"로 줄입니다.
+TITLE_BLOCK_RE = re.compile(r"\s*\([^()]*?([A-Za-z]{0,3}-?\d+[A-Za-z]?\s*(?:BL|블록))\s*\)", re.I)
+# 유형 줄에 이미 "국민"으로 나오는 끝의 "공공분양주택"도 지웁니다.
+TITLE_TAIL_RES = (
+    re.compile(r"\s*(?:추가\s*)?(?:입주자\s*)?(?:모집\s*)?(?:공고\s*(?:\([^)]*\))?|모집)\s*$"),
+    re.compile(r"\s*공공분양(?:주택)?\s*$"),
+)
 REGION_NAMES = (
     ("서울", ("서울",)), ("부산", ("부산",)), ("대구", ("대구",)), ("인천", ("인천",)),
     ("광주", ("광주",)), ("대전", ("대전",)), ("울산", ("울산",)), ("세종", ("세종",)),
@@ -660,9 +666,12 @@ def clean_title(name):
     text = name
     for pattern in TITLE_NOISE_RES:
         text = pattern.sub(" ", text)
+    text = TITLE_BLOCK_RE.sub(lambda m: " " + m.group(1), text)
     text = re.sub(r"\s+", " ", text).strip()
     while True:
-        trimmed = TITLE_TAIL_RE.sub("", text)
+        trimmed = text
+        for pattern in TITLE_TAIL_RES:
+            trimmed = pattern.sub("", trimmed)
         if trimmed == text or not trimmed:
             break
         text = trimmed

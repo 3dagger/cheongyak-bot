@@ -386,6 +386,17 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(cr.clean_title("2026년 마포구 신혼부부,청년(수요자맞춤형)주택 잔여세대 입주자 모집 공고"),
                          "2026년 마포구 신혼부부,청년(수요자맞춤형)주택 잔여세대")
         self.assertEqual(cr.clean_title("해링턴 플레이스 문래"), "해링턴 플레이스 문래")
+        # 블록 번호 괄호는 번호만 남기고(같은 이름의 다른 블록과 구분), 끝의 "공공분양주택"은 지웁니다.
+        self.assertEqual(cr.clean_title("부천대장 하우스토리 디센트(부천대장지구 A2BL) 공공분양주택"),
+                         "부천대장 하우스토리 디센트 A2BL")
+        self.assertEqual(cr.clean_title("왕숙 한신더휴 센텀(남양주 왕숙 A-17BL) 공공분양주택"), "왕숙 한신더휴 센텀 A-17BL")
+        self.assertEqual(cr.clean_title("계양신도시 카이브 유보라(AC4BL)"), "계양신도시 카이브 유보라 AC4BL")
+        self.assertEqual(cr.clean_title("엘리프 검단 포레듀(AA32블록)(4차)"), "엘리프 검단 포레듀 AA32블록(4차)")
+        self.assertEqual(cr.clean_title("시흥하중지구 A1블록 신혼희망타운(공공분양) 추가입주자모집공고"),
+                         "시흥하중지구 A1블록 신혼희망타운(공공분양)")
+        self.assertEqual(cr.clean_title("인천 검단신도시 AB13블록 호반써밋Ⅲ"), "인천 검단신도시 AB13블록 호반써밋Ⅲ")
+        self.assertEqual(cr.clean_title("리아츠 더 인천(24차)"), "리아츠 더 인천(24차)")
+        self.assertEqual(cr.clean_title("화성동탄 행복주택"), "화성동탄 행복주택")
         self.assertEqual(cr.clean_title("[공고]"), "[공고]")
         long_name = "가" * 50
         self.assertEqual(cr.clean_title(long_name), "가" * (cr.TITLE_MAX - 1) + "…")
