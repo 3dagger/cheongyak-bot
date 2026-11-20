@@ -735,6 +735,21 @@ def format_repeat(row, relevant):
     return "▪️ {} — {}".format(notice_name(row), " · ".join(details))
 
 
+def same_announcement(items, today_s):
+    """아직 청약할 수 있는 APT 공고 중 당첨자 발표일이 같은 것끼리 [(발표일, [공고])]로 묶습니다.
+
+    발표일이 같은 단지에 한 사람이 중복 청약하면 모두 무효라, 리포트 끝에 따로 알립니다.
+    리포트에 나온 공고만 넘겨받아, 본문에 없는 단지 이름이 경고에만 나오지 않게 합니다.
+    """
+    groups = {}
+    for row in items:
+        day = field(row, "PRZWNER_PRESNATN_DE")
+        if (row["_type"] == "APT" and ISO_DATE_RE.fullmatch(day) and day >= today_s
+                and last_date(row) >= today_s):
+            groups.setdefault(day, []).append(row)
+    return [(day, sorted(rows, key=sort_key)) for day, rows in sorted(groups.items()) if len(rows) > 1]
+
+
 def build_report(items, today, warnings=(), seen=None):
     """리포트 본문과 섹션별 건수 [(섹션, 건수)]를 돌려줍니다. 실을 공고가 없으면 건수 목록이 비어 있습니다.
 
@@ -786,6 +801,12 @@ def build_report(items, today, warnings=(), seen=None):
     # 그 섹션에 올라온 이유가 된 접수 단계를 굵게 표시합니다.
     add_section("오늘 접수", "📬 오늘 접수 (시작·마감)", having(due_today), due_today, bold=True)
     add_section("내일 마감", "⏰ 내일 마감", having(ends_tomorrow), ends_tomorrow, bold=True)
+    clashes = same_announcement([r for r in items if r["_id"] in shown], today_s)
+    if sections and clashes:
+        sections.append("<b>⚠️ 당첨자 발표일 같음</b>\n한 사람이 둘 다 청약하면 모두 무효입니다.\n\n" + "\n".join(
+            "▪️ {}: {}".format(short_date(day), " · ".join(html.escape(clean_title(field(r, "HOUSE_NM")))
+                                                          for r in rows))
+            for day, rows in clashes))
 
     footer = "".join("\n⚠️ " + html.escape(w) for w in warnings)
     footer = "\n" + footer if footer else ""
