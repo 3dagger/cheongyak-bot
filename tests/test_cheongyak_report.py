@@ -589,6 +589,30 @@ class BuildReportTest(unittest.TestCase):
         # 한 줄로 줄여도 섹션별 건수에는 그대로 셉니다.
         self.assertEqual(counts, [("새 공고", 1), ("특공 예정", 1), ("오늘 접수", 1), ("내일 마감", 1)])
 
+    def test_open_apt_notices_with_the_same_announcement_date_are_flagged_at_the_end(self):
+        def apt(row_id, area, begin, announced, **extra):
+            return self.row(row_id, area, [("특공", begin, begin)], PRZWNER_PRESNATN_DE=announced,
+                            _special={"신혼": 1}, **extra)
+        rows = [
+            apt("B&C 자이", "서울", "2026-11-23", "2026-12-01"),
+            apt("A 래미안", "경기", "2026-11-24", "2026-12-01"),
+            apt("D 힐스", "서울", "2026-11-25", "2026-12-02"),
+            apt("E 지난 단지", "서울", "2026-11-10", "2026-12-02"),  # 접수가 끝난 단지는 뺍니다.
+            apt("F 줍줍", "서울", "2026-11-23", "2026-12-02", _type="무순위·잔여"),  # APT만 봅니다.
+        ]
+        report, counts = cr.build_report(rows, TODAY, seen={r["_id"]: "2026-11-01" for r in rows})
+        self.assertTrue(self.sections(report)[-1] == (
+            "<b>⚠️ 당첨자 발표일 같음</b>\n한 사람이 둘 다 청약하면 모두 무효입니다.\n\n"
+            "▪️ 12/1(화): A 래미안 · B&amp;C 자이"), report)
+        self.assertEqual([label for label, _ in counts], ["특공 예정"])
+
+        report, _ = cr.build_report(rows[:1] + rows[2:], TODAY, seen={r["_id"]: "2026-11-01" for r in rows})
+        self.assertNotIn("발표일 같음", report)
+        # 리포트 본문에 나오지 않는 공고(특공 물량 없음, 새 공고 아님)는 경고에도 넣지 않습니다.
+        hidden = dict(rows[1], _special={})
+        report, _ = cr.build_report([rows[0], hidden], TODAY, seen={r["_id"]: "2026-11-01" for r in rows})
+        self.assertNotIn("발표일 같음", report)
+
     def test_first_run_title(self):
         new = self.row("new", "서울", [], RCRIT_PBLANC_DE="2026-11-12")
         report, _ = cr.build_report([new], TODAY)
