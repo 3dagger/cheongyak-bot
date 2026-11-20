@@ -806,6 +806,17 @@ class LookupEachTest(unittest.TestCase):
         self.assertEqual(rows[0]["_special"], {"신생아": 5, "신혼": 5})
         self.assertEqual(rows[0]["_prices"], [])
 
+    def test_leftover_units_get_prices_without_family_quotas(self):
+        rows = [{"_type": "임의공급", "HOUSE_MANAGE_NO": "1"}, {"_type": "무순위·잔여", "HOUSE_MANAGE_NO": "2"}]
+        bodies = {"getOPTLttotPblancMdl": {"data": [{"HOUSE_TY": "059.9892B", "LTTOT_TOP_AMOUNT": "36,800"}]},
+                  "getRemndrLttotPblancMdl": {"data": [{"HOUSE_TY": "059.8670A", "LTTOT_TOP_AMOUNT": "41668",
+                                                        "SUPLY_AR": "79.4728"}]}}
+        with mock.patch.object(cr, "http_get_json", side_effect=lambda url, params: bodies[url.rsplit("/", 1)[1]]):
+            self.assertEqual(cr.attach_model_details("key", rows), 0)
+        self.assertEqual([(r["_prices"], r["_special"]) for r in rows],
+                         [([(59, 36800, None)], {}), ([(59, 41668, 24)], {})])
+        self.assertFalse(cr.has_family_quota(rows[0]))
+
     def test_top_prices_are_attached_per_floor_area(self):
         rows = [{"_type": "APT", "HOUSE_MANAGE_NO": "1"}]
         body = {"data": [{"HOUSE_TY": "084.9409A", "LTTOT_TOP_AMOUNT": "182700", "SUPLY_AR": "110.9884"},

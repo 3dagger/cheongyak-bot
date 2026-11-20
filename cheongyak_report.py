@@ -43,9 +43,12 @@ ENDPOINTS = [
 # 리포트에서 빼는 주택 유형입니다. "오피스텔 등" 조회에는 도시형생활주택·생활숙박시설·민간임대도 함께 오므로,
 # 조회는 그대로 하고 여기 적힌 유형만 뺍니다. 다시 받으려면 비워 두면 됩니다.
 EXCLUDE_HOUSE_TYPES = ("오피스텔",)
-# 주택형별 조회에서 공고 단위로 합산할 특별공급 세대수 필드입니다.
+# 아직 접수 중인 공고를 주택형별로 다시 조회할 엔드포인트와, 공고 단위로 합산할 특별공급 세대수 필드입니다.
+# 분양가(LTTOT_TOP_AMOUNT)가 있으면 평형별 최고가도 붙습니다. 무순위·임의공급은 특공이 없어 분양가만 씁니다.
 MODEL_ENDPOINTS = {
     "APT": ("getAPTLttotPblancMdl", (("신생아", "NWBB_HSHLDCO"), ("신혼", "NWWDS_HSHLDCO"))),
+    "무순위·잔여": ("getRemndrLttotPblancMdl", ()),
+    "임의공급": ("getOPTLttotPblancMdl", ()),
     "공공지원 민간임대": ("getPblPvtRentLttotPblancMdl", (("신혼", "SPSPLY_NEW_MRRG_HSHLDCO"),)),
 }
 # 접수 단계별 (라벨, 시작일 필드, 종료일 필드). 지역별로 나뉜 1순위는 가장 이른 시작~가장 늦은 종료로 묶습니다.
